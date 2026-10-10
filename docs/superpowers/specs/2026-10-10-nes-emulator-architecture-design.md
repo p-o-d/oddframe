@@ -12,7 +12,7 @@ OddFrame is a NES emulator written in C# on .NET 10. It is a personal coding exe
 - Support convenient debugging: cycle-level stepping, breakpoints, trace logs, save states, rewind, and PPU viewers.
 - Keep the emulation core as a UI-agnostic class library consumed by several apps (desktop visualiser, CLI, tests).
 
-Out of scope for this design: PAL timing, Famicom Disk System, Zapper, netplay, shaders, mappers beyond the six listed in section 4.
+Out of scope for this design: PAL and Dendy timing (see section 2, Region), Famicom Disk System, Zapper, netplay, shaders, mappers beyond the six listed in section 4.
 
 ## Key decisions
 
@@ -59,7 +59,7 @@ Rules:
 
 ## 2. Timing and clock
 
-NTSC only. Master clock 21.477272 MHz. CPU divider 12, PPU divider 4, so one CPU cycle equals three PPU dots. Dividers are fields, not constants, so PAL (16 / 5) can be added later.
+NTSC only at first. Master clock 21.477272 MHz. CPU divider 12, PPU divider 4, so one CPU cycle equals three PPU dots. Dividers and scanline counts come from a `TimingProfile` (see Region below), not from constants, so other regions can be added later.
 
 ```
 Device.Tick()               One master clock. Hot path.
@@ -95,6 +95,23 @@ The CPU is cycle-stepped. `Cpu.Tick()` performs exactly one bus access (read or 
 ### APU
 
 `Apu.Tick()` runs once per CPU cycle. First iteration implements only the frame counter sequencer (4-step and 5-step modes) and its IRQ flag. Channels, length counters, mixer, and resampler come in milestone 7.
+
+### Region (future)
+
+NTSC only is implemented first, but the design keeps the door open for Dendy and PAL. To make that cheap later, the following must be parameters read from a `TimingProfile` (selected by `DeviceOptions.Region`), never hard-coded constants scattered through components:
+
+| Parameter | NTSC | Dendy | PAL |
+|---|---|---|---|
+| Master clock (Hz) | 21 477 272 | 26 601 712 | 26 601 712 |
+| CPU divider | 12 | 15 | 16 |
+| PPU divider | 4 | 5 | 5 |
+| PPU dots per CPU cycle | 3 | 3 | 3.2 |
+| Scanlines per frame | 262 | 312 | 312 |
+| NMI scanline | 241 | 291 | 241 |
+| Odd-frame dot skip | yes | no | no |
+| APU frame counter, DMC rate, noise period tables | NTSC | NTSC | PAL |
+
+Dendy is the cheap one: same 3:1 ratio as NTSC, only scanline count, NMI line, and the skip differ. PAL changes the ratio and the APU tables. Add Dendy first if 50 Hz is wanted; add PAL only when a specific PAL-exclusive game is wanted. Test ROMs are NTSC, so the test ladder always runs in NTSC.
 
 ### Determinism
 
