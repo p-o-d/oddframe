@@ -58,3 +58,6 @@ nunit-*.xml
 tests/roms/*
 !tests/roms/fetch.sh
 !tests/roms/checksums.txt
+
+# IntelliJ
+.idea/
