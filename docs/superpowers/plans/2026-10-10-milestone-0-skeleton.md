@@ -10,6 +10,17 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-10-nes-emulator-architecture-design.md`, sections 1, 2, 3, 5 (Snapshots), 7, 8.
 
+## Deviations during implementation
+
+The plan below is kept as written. The implementation differs in these points:
+
+- **Solution file** is `oddframe.slnx`, not `oddframe.sln`; spec section 1 is updated. Every `oddframe.sln` below means `oddframe.slnx`. Only the test project sits in a solution folder (`/tests/`); the three `src/` projects are at the solution root (`dotnet sln add --in-root`).
+- **Branch** is `milestone-0-implementation`, not `milestone-0-skeleton`. The PR was opened during Task 10, because the CI `push` trigger only fires on `master`.
+- **`global.json`** also sets `"test": {"runner": "Microsoft.Testing.Platform"}`, added by the xUnit v3 template. `dotnet test` exits with code 8 when a filter matches no tests; a run where every test is skipped exits 0.
+- **Task 8:** Avalonia templates 12.1.4 no longer generate `BuiltInComInteropSupport` or `AvaloniaUseCompiledBindingsByDefault` (compiled bindings are the default), so there is nothing to keep.
+- **Task 9:** the repo-root marker for `TestRoms.RootDirectory` is `global.json`. Committed in two parts: fetch script, then the skip helper.
+- **Task 10:** actions are `checkout@v7`, `setup-dotnet@v6`, `cache@v6`. The ROM cache key hashes `fetch.sh` as well as `checksums.txt`, because the cached `tests/roms` directory contains the script and a hit would restore a stale copy. The workflow also sets `permissions: contents: read`, a per-ref `concurrency` group, and 10-minute job timeouts.
+
 ---
 
 ## Decisions locked for this plan

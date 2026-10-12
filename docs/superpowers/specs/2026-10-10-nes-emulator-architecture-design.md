@@ -28,7 +28,7 @@ Out of scope for this design: PAL and Dendy timing (see section 2, Region), Fami
 ## 1. Solution layout
 
 ```
-oddframe.sln
+oddframe.slnx
 src/
   OddFrame.Core/          Class library. Zero non-BCL dependencies. All emulation logic.
     Device.cs             Top-level device: owns components, master clock, Tick() and Step*() helpers.
