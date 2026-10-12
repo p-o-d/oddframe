@@ -8,9 +8,7 @@
 ## Get latest from https://github.com/github/gitignore/blob/main/Dotnet.gitignore
 
 # Build results
-[Dd]ebug/
 [Dd]ebugPublic/
-[Rr]elease/
 [Rr]eleases/
 x64/
 x86/
@@ -55,3 +53,12 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Test ROMs are fetched, never committed
+tests/roms/*
+!tests/roms/fetch.sh
+!tests/roms/checksums.txt
+
+# IntelliJ
+.idea/
+*.DotSettings.user

@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet build --configuration Release
+      - run: dotnet test --configuration Release --no-build --filter "Category!=Rom"
+
+  roms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      # The key covers fetch.sh too: tests/roms holds the script, and a stale
+      # cache hit would otherwise restore an old copy over the checked-out one.
+      - uses: actions/cache@v6
+        with:
+          path: tests/roms
+          key: roms-${{ hashFiles('tests/roms/checksums.txt', 'tests/roms/fetch.sh') }}
+      - run: tests/roms/fetch.sh
+      - run: dotnet build --configuration Release
+      - run: dotnet test --configuration Release --no-build --filter "Category=Rom"
