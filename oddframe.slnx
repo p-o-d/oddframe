@@ -2,6 +2,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/OddFrame.Core.Tests/OddFrame.Core.Tests.csproj" />
   </Folder>
+  <Project Path="src/OddFrame.App/OddFrame.App.csproj" />
   <Project Path="src/OddFrame.Cli/OddFrame.Cli.csproj" />
   <Project Path="src/OddFrame.Core/OddFrame.Core.csproj" />
 </Solution>
