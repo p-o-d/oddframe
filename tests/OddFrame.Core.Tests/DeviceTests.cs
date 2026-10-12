@@ -103,6 +103,15 @@ public class DeviceTests
     }
 
     [Fact]
+    public void LoadState_TrailingBytes_Throws()
+    {
+        var device = new Device(new DeviceOptions());
+        var state = device.SaveState();
+        state = [.. state, 0x00];
+        Assert.Throws<InvalidDataException>(() => device.LoadState(state));
+    }
+
+    [Fact]
     public void SaveState_HeaderLayout()
     {
         var device = new Device(new DeviceOptions());
