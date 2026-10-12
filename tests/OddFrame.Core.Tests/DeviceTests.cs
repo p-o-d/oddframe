@@ -106,7 +106,7 @@ public class DeviceTests
     public void SaveState_HeaderLayout()
     {
         var device = new Device(new DeviceOptions());
-        byte[] state = device.SaveState();
+        var state = device.SaveState();
         Assert.Equal(state[..4], "ODDF"u8.ToArray());
         Assert.Equal(1, BinaryPrimitives.ReadUInt16LittleEndian(state.AsSpan(4)));
         Assert.Equal(46, state.Length);
