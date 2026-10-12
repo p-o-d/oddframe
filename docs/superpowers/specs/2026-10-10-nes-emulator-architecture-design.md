@@ -172,7 +172,7 @@ Constructor injection, no DI container. `Device` builds components in dependency
 
 ### Reset vs power-on
 
-`PowerOn()` sets the documented power-up state (P = `$34`, S = `$FD`, RAM zeroed). `Reset()` does only what the reset line does (PC from `$FFFC`, S decremented by 3, I flag set). Both run the CPU reset sequence as real cycles.
+`PowerOn()` sets the documented power-up state (P = `$34`, S = `$FD`, RAM zeroed). P is stored without bits 4 (B) and 5 (U), which are not real flags; `$34` is the value as PHP would push it, the stored value is `$04`. `Reset()` does only what the reset line does (PC from `$FFFC`, S decremented by 3, I flag set). Both run the CPU reset sequence as real cycles.
 
 ## 4. Cartridge and mappers
 
@@ -244,7 +244,7 @@ public sealed class ObservableBus : IBus
 
 ### Trace log
 
-`ITraceSink { void OnInstruction(in CpuTraceEntry entry); }`. The CPU calls it at each instruction boundary when a sink is attached, passing registers, PC, opcode bytes, current PPU scanline and dot, and total CPU cycles. `NestestFormatter` turns an entry into the standard nestest log line. Formatting stays out of the CPU.
+`ITraceSink { void OnInstruction(in CpuTraceEntry entry); }`. The CPU calls it at each instruction boundary when a sink is attached. `CpuTraceEntry` carries CPU state only: registers, PC, opcode bytes, and total CPU cycles. `NestestFormatter.Format(entry, bus, scanline, dot)` turns an entry into the standard nestest log line; the PPU scanline and dot are supplied by the caller (a Device-level sink reading the real PPU from milestone 3; computed from the cycle count in milestone 1 tests). Operand values are read with `Peek` only. Formatting stays out of the CPU.
 
 ### Breakpoints
 
@@ -327,7 +327,7 @@ All tests in `OddFrame.Core.Tests` (xUnit).
 
 | ROM | Check | Covers |
 |---|---|---|
-| `nestest.nes` | Force PC to `$C000`, trace through `NestestFormatter`, diff line by line against `nestest.log`; then assert `$02` and `$03` are zero. | All official and unofficial opcodes, cycle counts |
+| `nestest.nes` | Point the RAM reset vector at `$C000` and run the real reset sequence, trace through `NestestFormatter`, diff line by line against `nestest.log`; then assert `$02` and `$03` are zero. | All official and unofficial opcodes, cycle counts |
 | blargg `instr_test-v5`, `cpu_timing_test6`, `instr_misc`, `cpu_interrupts_v2` | Run until `$6000` leaves `$80`, read status byte, read text at `$6004`. | CPU edge cases, dummy reads, interrupt timing |
 | blargg `ppu_vbl_nmi`, `sprite_hit_tests`, `sprite_overflow_tests`, `oam_read`, `ppu_open_bus` | Same `$6000` protocol. | PPU timing, sprite 0, NMI edge |
 | blargg `apu_test`, `apu_reset`, `dmc_dma_during_read4` | Same protocol. | APU frame counter, later channels |
@@ -350,7 +350,7 @@ One test class per component, named after it. `[Trait("Category", "Rom")]` on RO
 | # | Milestone | Done when |
 |---|---|---|
 | 0 | Skeleton | Solution, three projects, test project, `Device` with empty `Tick()`. `dotnet build && dotnet test` green. ROM fetch script works. |
-| 1 | CPU | All 256 opcodes cycle-stepped, interrupts, reset sequence. nestest log diff identical for all 8991 lines. blargg `instr_test-v5` passes with a RAM-only cartridge stub. |
+| 1 | CPU | All 256 opcodes cycle-stepped, interrupts, reset sequence. nestest log diff identical for all 8991 lines. All 16 blargg `instr_test-v5/rom_singles` pass on a RAM-only bus stub (`$2002` reads return `$80`). `all_instrs.nes` requires MMC1 and moves to milestone 6. |
 | 2 | Bus + NROM + CLI | `InesLoader`, `Cartridge`, `Nrom`, real `CpuBus` with RAM mirroring. `oddframe trace` on nestest matches through the real bus. `cpu_timing_test6` passes. |
 | 3 | PPU background | Scanline/dot state machine, vblank and NMI, `$2000-$2007`, background fetch pipeline, scrolling, palette. `oddframe run --screenshot` shows the Donkey Kong title screen. `ppu_vbl_nmi` passes. |
 | 4 | PPU sprites + input + App | OAM DMA, sprite evaluation, sprite 0 hit, 8×16 sprites, controllers. Avalonia window with keyboard. Donkey Kong, SMB, Balloon Fight playable. `sprite_hit_tests` pass. |

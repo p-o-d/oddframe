@@ -232,7 +232,7 @@ git commit -m "feat: add 6502 opcode table and CPU enums"
 Harness: `NewCpu(out RecordingBus bus)` constructs both, writes `$00 $80` at `$FFFC`, calls `PowerOn()`, then `RunCycles(7)`, then `bus.Log.Clear()`. Tests that need the raw sequence skip the clear.
 
 - `PowerOn_AfterSevenCycles_RegistersMatchSpec`: `A == X == Y == 0`, `S == 0xFD`, `P == StatusFlags.I`, `PC == 0x8000`, `TotalCycles == 7`, `IsInstructionBoundary`.
-- `PowerOn_SequenceIsSevenReadsNoWrites`: log has 7 entries, none `IsWrite`; entries 3-5 are reads of `0x01FF`, `0x01FE`, `0x01FD` (S starts at `$00` and wraps); entries 6-7 read `0xFFFC`, `0xFFFD`.
+- `PowerOn_SequenceIsSevenReadsNoWrites`: log has 7 entries, none `IsWrite`; entries 3-5 are reads of `0x0100`, `0x01FF`, `0x01FE` (S starts at `$00`; each dummy push reads `$0100+S` then decrements, ending at `$FD`); entries 6-7 read `0xFFFC`, `0xFFFD`.
 - `Reset_FromRunningState_DecrementsSByThreeAndSetsI`: after power-on set `S = 0x80`, clear I by running `58 CLI`, call `Reset()`, run 7 cycles, expect `S == 0x7D`, I set, A/X/Y untouched, PC from vector.
 - `Constructor_IsEquivalentToPowerOn`: a fresh `Cpu` ticked 7 times without calling `PowerOn()` reaches the same state as one where `PowerOn()` was called.
 
@@ -316,7 +316,7 @@ Also `PpuColumn_PadsToThree`: `PPU:134,134` and `PPU:  0, 21`.
 
 ---
 
-### Task 5: nestest harness (stays red until Task 11)
+### Task 5: nestest harness (stays red until Task 10)
 
 **Files:**
 - Create: `tests/OddFrame.Core.Tests/Roms/NestestTests.cs`
@@ -599,10 +599,10 @@ Run: `dotnet test`
 - [ ] `dotnet build` with zero warnings (Core has warnings-as-errors; the test project should also be clean).
 - [ ] `dotnet test --filter "Category!=Rom"` and `dotnet test --filter "Category=Rom"` both green locally and in CI. The CI ROM cache key includes `fetch.sh`, which changed, so the first run refetches.
 - [ ] Prove the fresh-clone promise: move `tests/roms/instr_test-v5` aside, run the ROM filter, expect 16 skipped, move it back.
-- [ ] Spec amendments *(Claude may write, after owner approval)*: see the next section.
+- [x] Spec amendments: applied 2026-10-13, see the section below.
 - [ ] `AGENTS.md`: Milestones entry for 1 mentions the singles; Conventions line about one test class per component allows a folder per component.
 - [ ] README: nothing new until `trace` exists in M2.
-- [ ] Open the PR from `milestone-1` to `master`.
+- [ ] Open the PR from `milestone-1-implementation` to `master`.
 
 ---
 
@@ -613,7 +613,7 @@ Run: `dotnet test`
 - `cpu_timing_test6`, `instr_misc`, `cpu_interrupts_v2` need the real bus, APU frame IRQ, or PPU NMI. M2 and M3.
 - Open bus: unmapped reads return 0 (spec section 4). Nothing to do in M1.
 
-## Spec amendments this plan needs (pending owner approval)
+## Spec amendments this plan needs (approved and applied 2026-10-13)
 
 1. **Section 8, milestone 1 row.** "blargg `instr_test-v5` passes with a RAM-only cartridge stub" → "all 16 `instr_test-v5/rom_singles` pass on a RAM-only bus stub (`$2002` reads return `$80`). `all_instrs.nes` requires MMC1 and moves to milestone 6."
 2. **Section 5, Trace log.** `CpuTraceEntry` carries CPU registers, opcode bytes, and total CPU cycles. PPU scanline and dot are supplied by the caller of `NestestFormatter` (Device-level sink from M3; computed from cycles in M1 tests).
