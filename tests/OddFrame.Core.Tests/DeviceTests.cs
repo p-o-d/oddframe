@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace OddFrame.Core.Tests;
 
 public class DeviceTests
@@ -48,5 +50,65 @@ public class DeviceTests
         device.Tick();
         device.StepCpuCycle();
         Assert.Equal((ulong)TimingProfile.Ntsc.CpuDivider, device.MasterClock);
+    }
+
+    [Fact]
+    public void SaveLoad_RoundTripsMasterClock()
+    {
+        var a = new Device(new DeviceOptions());
+        for(var i =  0; i < 37; i++)
+            a.Tick();
+        var state = a.SaveState();
+        var b = new Device(new DeviceOptions());
+        b.LoadState(state);
+        Assert.Equal(37UL, b.MasterClock);
+    }
+
+    [Fact]
+    public void LoadState_RejectsWrongMagic()
+    {
+        var device = new Device(new DeviceOptions());
+        Assert.Throws<InvalidDataException>(() => device.LoadState(new byte[46]));
+    }
+
+    [Fact]
+    public void SaveState_IsDeterministic()
+    {
+        var a = new Device(new DeviceOptions());
+        var b = new Device(new DeviceOptions());
+        for (var i = 0; i < 14; i++)
+        {
+            a.Tick();
+            b.Tick();
+        }
+        Assert.Equal(a.SaveState(), b.SaveState());    
+    }
+
+    [Fact]
+    public void LoadState_RejectsWrongVersion()
+    {
+        var device = new Device(new DeviceOptions());
+        var state = device.SaveState();
+        state[4] = 2;
+        Assert.Throws<InvalidDataException>(() => device.LoadState(state));
+    }
+
+    [Fact]
+    public void LoadState_Truncated_Throws()
+    {
+        var device = new Device(new DeviceOptions());
+        var state = device.SaveState();
+        state = state[..40];
+        Assert.Throws<InvalidDataException>(() => device.LoadState(state));
+    }
+
+    [Fact]
+    public void SaveState_HeaderLayout()
+    {
+        var device = new Device(new DeviceOptions());
+        byte[] state = device.SaveState();
+        Assert.Equal(state[..4], "ODDF"u8.ToArray());
+        Assert.Equal(1, BinaryPrimitives.ReadUInt16LittleEndian(state.AsSpan(4)));
+        Assert.Equal(46, state.Length);
     }
 }
