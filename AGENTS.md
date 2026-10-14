@@ -56,7 +56,7 @@ docs/superpowers/specs/ design documents
 ## Conventions
 
 - `net10.0`, nullable enabled, warnings as errors in Core.
-- One namespace per folder: `OddFrame.Core.Cpu`, `OddFrame.Core.Ppu`, `OddFrame.Core.Bus`, `OddFrame.Core.Cartridge`, `OddFrame.Core.Input`, `OddFrame.Core.Debug`.
+- One namespace per folder: `OddFrame.Core.Processor` (`Cpu`), `OddFrame.Core.Video` (`Ppu`), `OddFrame.Core.Audio` (`Apu`), `OddFrame.Core.Bus`, `OddFrame.Core.Cartridges` (`Cartridge`, mappers), `OddFrame.Core.Input`, `OddFrame.Core.Debug`. A namespace never shares a name with a type: `Cpu` inside `OddFrame.Core.Cpu` breaks every use from outside with CS0118. Test folders mirror these names.
 - Hex literals for addresses and register values (`0x2002`, not `8194`). In prose use `$2002`.
 - Tests: xUnit. One test class per component. ROM tests carry `[Trait("Category", "Rom")]` and skip when the ROM file is missing.
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`), subject 50 characters or fewer.

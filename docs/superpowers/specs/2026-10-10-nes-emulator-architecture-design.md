@@ -32,11 +32,11 @@ oddframe.slnx
 src/
   OddFrame.Core/          Class library. Zero non-BCL dependencies. All emulation logic.
     Device.cs             Top-level device: owns components, master clock, Tick() and Step*() helpers.
-    Cpu/                  Cpu, instruction table, addressing modes, trace entry struct.
-    Ppu/                  Ppu, built-in palette, framebuffer writer.
-    Apu/                  Apu (frame counter now, channels later).
+    Processor/            Cpu, instruction table, addressing modes, trace entry struct.
+    Video/                Ppu, built-in palette, framebuffer writer.
+    Audio/                Apu (frame counter now, channels later).
     Bus/                  IBus, CpuBus, PpuBus.
-    Cartridge/            InesLoader, RomImage, Cartridge, IMapper, MapperBase, MapperFactory, Mappers/.
+    Cartridges/           InesLoader, RomImage, Cartridge, IMapper, MapperBase, MapperFactory, Mappers/.
     Input/                Buttons enum, StandardController.
     Debug/                ObservableBus, ITraceSink, NestestFormatter, BreakpointSet, RewindBuffer, PpuDebugRenderer.
   OddFrame.App/           Avalonia desktop app. Screen, input, debugger panels.
@@ -53,7 +53,7 @@ Rules:
 - `OddFrame.Core` references only the BCL. No Avalonia, no System.Drawing, no ImageSharp.
 - `App` and `Cli` reference `Core`. Never the reverse.
 - `Core` exposes no UI types. Framebuffer is `uint[]` / `ReadOnlySpan<uint>`; audio is `float[]`; input is a `byte` bitmask.
-- One namespace per folder: `OddFrame.Core.Cpu`, `OddFrame.Core.Ppu`, etc. `Device` lives in `OddFrame.Core`.
+- One namespace per folder: `OddFrame.Core.Processor`, `OddFrame.Core.Video`, `OddFrame.Core.Audio`, `OddFrame.Core.Cartridges`, etc. `Device` lives in `OddFrame.Core`. A namespace must not share a name with a type it contains or that code outside it references (`Cpu` in `OddFrame.Core.Cpu` fails with CS0118 from `Device` and from tests).
 - Debug helpers live inside `Core` under `Debug/`. They need bus internals and must cost nothing when unused.
 - Project settings: `net10.0`, `<Nullable>enable</Nullable>`, `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` in Core, no unsafe code.
 
