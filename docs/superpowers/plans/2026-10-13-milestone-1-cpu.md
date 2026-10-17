@@ -43,6 +43,7 @@ Change any of these before starting; the tasks assume them.
 - blargg status `$6000` is `0` from RAM before the ROM writes anything. Do not stop on "not `$80`" alone; require the `$DE $B0 $61` signature at `$6001-$6003` first.
 - `nestest.nes` has 16 KB PRG. Load it at both `$8000` and `$C000`; the ROM jumps between the mirrors.
 - The log is exactly 8991 lines and ends at `C66E RTS`, `CYC:26554`. Do not run past it. The stack is empty at that RTS, so the CPU jumps into zero page afterwards.
+- Lines 8981-8989 write the APU registers and print `STA $4015 = FF`, `STA $4004 = FF` through `STA $4007 = FF`. Nintendulator's open APU registers read back `$FF`; a plain `RamBus` peeks `$00` there and those five lines mismatch. The nestest harness uses `NestestBus`, whose `Read` and `Peek` return `$FF` for `$4000-$4017`. Verified 2026-10-15; no other line in the log touches `$4000-$4017`.
 - `*` for unofficial opcodes sits at column 15 (0-based); the mnemonic always starts at column 16. Register block starts at column 48. PPU fields are `%3d,%3d`.
 - Unofficial opcodes instr_test-v5 does **not** test (marked `?` in its readme): `$8B XAA`, `$93/$9F AHX`, `$9B TAS`, `$BB LAS`. Implement a documented behaviour and move on. It **does** test `$9C SHY`, `$9E SHX`, `$AB LXA`, `$0B/$2B ANC`, `$4B ALR`, `$6B ARR`, `$CB AXS`, `$EB SBC`.
 - `dotnet test` exits 8 when a filter matches nothing. All-skipped is exit 0.
@@ -67,6 +68,7 @@ src/OddFrame.Core/Debug/NestestFormatter.cs   static string Format(in CpuTraceEn
 
 tests/OddFrame.Core.Tests/Fakes/RecordingBus.cs       IBus over RamBus, logs (Address, Value, IsWrite) per access
 tests/OddFrame.Core.Tests/Fakes/BlarggStubBus.cs      IBus over RamBus, $2002 reads return $80
+tests/OddFrame.Core.Tests/Fakes/NestestBus.cs         IBus over RamBus, $4000-$4017 reads and peeks return $FF
 tests/OddFrame.Core.Tests/Fakes/ListTraceSink.cs      ITraceSink collecting entries
 tests/OddFrame.Core.Tests/Processor/CpuTestHarness.cs       helpers: NewCpuAt(ushort pc), RunInstruction, RunCycles
 tests/OddFrame.Core.Tests/Processor/OpcodeTableTests.cs
@@ -319,13 +321,23 @@ Also `PpuColumn_PadsToThree`: `PPU:134,134` and `PPU:  0, 21`.
 ### Task 5: nestest harness (stays red until Task 10)
 
 **Files:**
+- Create: `tests/OddFrame.Core.Tests/Fakes/NestestBus.cs`
+- Create: `tests/OddFrame.Core.Tests/Fakes/NestestBusTests.cs`
 - Create: `tests/OddFrame.Core.Tests/Roms/NestestTests.cs`
+
+- [ ] **Step 0: Write `NestestBus` and its tests**
+
+`NestestBus : IBus` wraps a `RamBus` (exposed as `Ram`). `Read` and `Peek` return `0xFF` for `0x4000 <= address <= 0x4017`; everything else passes through. `Write` always passes through to `Ram`, so a later peek of `$4015` still returns `$FF` (see Known traps).
+
+- `NestestBus_PeekApuRange_ReturnsFF`: `Peek(0x4000)`, `Peek(0x4015)`, `Peek(0x4017)` all `0xFF` on a fresh bus.
+- `NestestBus_PeekApuRange_IgnoresWrites`: `Write(0x4015, 0x02)`, then `Peek(0x4015) == 0xFF`.
+- `NestestBus_OutsideApuRange_IsRam`: `Peek(0x3FFF)` and `Peek(0x4018)` are `0x00`; `Write(0x0300, 0x89)` then `Read(0x0300) == 0x89`.
 
 - [ ] **Step 1: Write `NestestTests`** `[Trait("Category", "Rom")]`
 
 - `Trace_MatchesReferenceLog`:
   1. `TestRoms.Require("other/nestest.nes")` and `"other/nestest.log"`.
-  2. PRG = file bytes `[16 .. 16 + 0x4000)`. `bus.Ram.Load(0x8000, prg)` and `Load(0xC000, prg)`. Then overwrite `0xFFFC` with `00 C0`.
+  2. Bus is `NestestBus`. PRG = file bytes `[16 .. 16 + 0x4000)`. `bus.Ram.Load(0x8000, prg)` and `Load(0xC000, prg)`. Then overwrite `0xFFFC` with `00 C0`.
   3. `cpu.PowerOn()`, run 7 cycles. Attach `ListTraceSink` that formats each entry immediately with `scanline = (int)(cycles * 3 / 341 % 262)`, `dot = (int)(cycles * 3 % 341)`.
   4. Loop: tick until the sink has 8991 lines or a cap of 100 000 cycles is hit (the log ends at 26 554; the cap catches runaway loops).
   5. Compare line by line against the expected file. On the first mismatch fail with: line number, expected, actual, and the previous expected line for context. Compare all lines even when counts differ, then assert counts.

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using OddFrame.Core.Bus;
+using OddFrame.Core.Debug;
 
 namespace OddFrame.Core.Processor;
 
@@ -35,6 +36,7 @@ public sealed partial class Cpu
 
     public ulong TotalCycles { get; private set; }
     public bool IsInstructionBoundary => _cycle == 0;
+    public ITraceSink? TraceSink { get; set; }
 
     public void PowerOn()
     {
@@ -55,6 +57,23 @@ public sealed partial class Cpu
 
     public void Tick()
     {
+        if (_cycle == 0 && TraceSink is not null && _pendingInterrupt == InterruptKind.None)
+        {
+            var entry = new CpuTraceEntry(
+                PC,
+                A,
+                X,
+                Y,
+                S,
+                P,
+                _bus.Peek(PC),
+                _bus.Peek((ushort)(PC + 1)),
+                _bus.Peek((ushort)(PC + 2)),
+                TotalCycles
+            );
+            TraceSink.OnInstruction(entry);
+        }
+
         TotalCycles++;
         if (_cycle == 0)
         {
