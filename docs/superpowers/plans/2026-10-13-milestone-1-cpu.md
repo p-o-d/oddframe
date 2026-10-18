@@ -322,7 +322,7 @@ Also `PpuColumn_PadsToThree`: `PPU:134,134` and `PPU:  0, 21`.
 
 **Files:**
 - Create: `tests/OddFrame.Core.Tests/Fakes/NestestBus.cs`
-- Create: `tests/OddFrame.Core.Tests/Fakes/NestestBusTests.cs`
+- Create: `tests/OddFrame.Core.Tests/NestestBusTests.cs` (next to `RecordingBusTests.cs` and `BlarggStubBusTests.cs`)
 - Create: `tests/OddFrame.Core.Tests/Roms/NestestTests.cs`
 
 - [ ] **Step 0: Write `NestestBus` and its tests**
