@@ -102,7 +102,18 @@ public sealed partial class Cpu
 
     private void StepInstruction()
     {
-        throw new NotImplementedException($"opcode ${_opcode:X2}");
+        var info = OpcodeTable.Entries[_opcode];
+        switch (info.Kind)
+        {
+           case InstructionKind.Implied:
+               StepImplied(info);
+               break;
+           case InstructionKind.Read:
+               StepRead(info);
+               break;
+           default:
+               throw new NotImplementedException($"opcode ${_opcode:X2} {info.Mnemonic} {info.Mode}");
+        }
     }
 
     private void StepInterrupt()
@@ -129,6 +140,11 @@ public sealed partial class Cpu
             default:
                 throw new UnreachableException($"interrupt cycle {_cycle}");
         }
+    }
+
+    private void EndInstruction()
+    {
+        _cycle = 0;
     }
 
     private void PushOrDummy(byte value)

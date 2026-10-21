@@ -15,6 +15,13 @@ public static class CpuTestHarness
         return cpu;
     }
 
+    public static Cpu NewCpuWithProgram(out RecordingBus bus, params byte[] program)
+    {
+        var cpu = NewCpu(out bus);
+        bus.Ram.Load(0x8000, program);
+        return cpu;
+    }
+
     public static void RunCycles(this Cpu cpu, int n)
     {
         for (var i = 0; i < n; i++)
@@ -33,5 +40,37 @@ public static class CpuTestHarness
         } 
         while (!cpu.IsInstructionBoundary);
         return count;
+    }
+    
+    public enum Register { A, X, Y, S }
+
+    extension(Cpu cpu)
+    {
+        public byte Get(Register r) => r switch
+        {
+            Register.A => cpu.A, Register.X => cpu.X, Register.Y => cpu.Y, Register.S => cpu.S,
+            _ => throw new ArgumentOutOfRangeException(nameof(r)),
+        };
+
+        public void Set(Register r, byte value)
+        {
+            switch (r)
+            {
+                case Register.A:
+                    cpu.A = value;
+                    break;
+                case Register.X:
+                    cpu.X = value;
+                    break;
+                case Register.Y:
+                    cpu.Y = value;
+                    break;
+                case Register.S:
+                    cpu.S = value;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(r));
+            }
+        }
     }
 }

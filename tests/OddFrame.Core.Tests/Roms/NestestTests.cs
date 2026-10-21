@@ -72,7 +72,7 @@ public class NestestTests
             var sb = new StringBuilder();
             sb.Append($"trace stopped after {sink.Lines.Count} of {LogLines} lines, ");
             sb.AppendLine(ex is not null
-                ? $"ex ({ex.GetType().Name}, {ex.Message}, PC=${cpu.PC:X4})"
+                ? $"ex ({ex.GetType().Name}, {ex.Message}, PC ${cpu.PC:X4})"
                 : "cycle cap hit");
             if (sink.Lines.Count > 0)
                 sb.AppendLine($"last: {sink.Lines[^1]}");
