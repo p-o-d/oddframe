@@ -47,6 +47,11 @@ partial class Cpu
                 break;
             case Operation.Nop:
                 break;
+            case Operation.Bit:
+                SetFlag(StatusFlags.Z, (A & m) == 0);
+                SetFlag(StatusFlags.N, (m & 0x80) != 0);
+                SetFlag(StatusFlags.V, (m & 0x40) != 0);
+                break;
             default:
                 throw new NotImplementedException(op.ToString());
         }
@@ -150,6 +155,83 @@ partial class Cpu
             default:
                 throw new NotImplementedException(op.ToString());
         }
+    }
+    
+    private void FetchAddressLow()
+    {
+        _address = _bus.Read(PC++);
+    }
+
+    private void FetchAddressHigh()
+    {
+        _address |= (ushort)(_bus.Read(PC++) << 8);
+    }
+
+    private void FetchAddressHighIndexed(byte index)
+    {
+        var low = (byte)_address;
+        var hi = _bus.Read(PC++);
+        var sum = low + index;
+        _pageCrossed = sum > 0xFF;
+        _address = (ushort)(hi << 8 | (byte)sum); // carry unfixed
+    }
+
+    private void IndexZeroPage(byte index)
+    {
+        _ = _bus.Read(_address);
+        _address = (byte)(_address + index); // ignores carry, circled on the first memory page
+    }
+
+    private void FetchPointer()
+    {
+        _pointer = _bus.Read(PC++);
+    }
+
+    private void IndexPointer()
+    {
+        _ = _bus.Read(_pointer);
+        _pointer = (byte)(_pointer + X);
+    }
+
+    private void ReadPointerLow()
+    {
+        _address = _bus.Read(_pointer);
+    }
+
+    private void ReadPointerHigh()
+    {
+        var value = _bus.Read((byte)(_pointer + 1));
+        _address |= (ushort)(value << 8);
+    }
+
+    private void ReadPointerHighIndexed(byte index)
+    {
+        var low = (byte)_address;
+        var hi = _bus.Read((byte)(_pointer + 1));
+        var sum = low + index;
+        _pageCrossed = sum > 0xFF;
+        _address = (ushort)(hi << 8 | (byte)sum); // carry unfixed
+    }
+
+    private void ReadUnfixedOrFix(OpcodeInfo opcode)
+    {
+        var value = _bus.Read(_address);
+        if (_pageCrossed)
+        {
+            _address = (ushort)(_address + 0x0100);
+        }
+        else
+        {
+            ExecuteRead(opcode.Op,  value);
+            EndInstruction();
+        }
+    }
+
+    private void FinishRead(OpcodeInfo opcode)
+    {
+        var value = _bus.Read(_address);
+        ExecuteRead(opcode.Op,  value);
+        EndInstruction();
     }
 
     private void Adc(byte m)

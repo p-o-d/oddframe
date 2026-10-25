@@ -273,4 +273,41 @@ public class CpuInstructionTests
         Assert.Equal((byte)0x00, cpu.X);
         Assert.Equal((byte)0x00, cpu.Y);
     }
+
+    // A & m = 0 gives Z, while N and V come from m alone.
+    [Fact]
+    public void BIT_SetsNVFromMemory_ZFromAnd()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x24, 0x10);
+        bus.Ram.Load(0x0010, [0xC0]);
+        cpu.A = 0x3F;
+        cpu.P = StatusFlags.None;
+        Assert.Equal(3, cpu.RunInstruction());
+        Assert.Equal(StatusFlags.Z | StatusFlags.V | StatusFlags.N, cpu.P);
+        Assert.Equal((byte)0x3F, cpu.A);
+    }
+
+    [Fact]
+    public void BIT_ClearsStaleNVZ()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x24, 0x10);
+        bus.Ram.Load(0x0010, [0x01]);
+        cpu.A = 0x01;
+        cpu.P = StatusFlags.Z | StatusFlags.V | StatusFlags.N;
+        Assert.Equal(3, cpu.RunInstruction());
+        Assert.Equal(StatusFlags.None, cpu.P);
+        Assert.Equal((byte)0x01, cpu.A);
+    }
+
+    [Fact]
+    public void BIT_Absolute()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x2C, 0x34, 0x12);
+        bus.Ram.Load(0x1234, [0x40]);
+        cpu.A = 0xFF;
+        cpu.P = StatusFlags.None;
+        Assert.Equal(4, cpu.RunInstruction());
+        Assert.Equal(StatusFlags.V, cpu.P);
+        Assert.Equal((byte)0xFF, cpu.A);
+    }
 }

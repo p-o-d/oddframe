@@ -44,33 +44,35 @@ public static class CpuTestHarness
     
     public enum Register { A, X, Y, S }
 
-    extension(Cpu cpu)
+    public static byte Get(this Cpu cpu, Register r) => r switch
     {
-        public byte Get(Register r) => r switch
-        {
-            Register.A => cpu.A, Register.X => cpu.X, Register.Y => cpu.Y, Register.S => cpu.S,
-            _ => throw new ArgumentOutOfRangeException(nameof(r)),
-        };
+        Register.A => cpu.A, Register.X => cpu.X, Register.Y => cpu.Y, Register.S => cpu.S,
+        _ => throw new ArgumentOutOfRangeException(nameof(r)),
+    };
 
-        public void Set(Register r, byte value)
+    public static void Set(this Cpu cpu, Register r, byte value)
+    {
+        switch (r)
         {
-            switch (r)
-            {
-                case Register.A:
-                    cpu.A = value;
-                    break;
-                case Register.X:
-                    cpu.X = value;
-                    break;
-                case Register.Y:
-                    cpu.Y = value;
-                    break;
-                case Register.S:
-                    cpu.S = value;
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(r));
-            }
+            case Register.A:
+                cpu.A = value;
+                break;
+            case Register.X:
+                cpu.X = value;
+                break;
+            case Register.Y:
+                cpu.Y = value;
+                break;
+            case Register.S:
+                cpu.S = value;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(r));
         }
+    }
+
+    public static (ushort, bool)[] Addresses(this RecordingBus bus)
+    {
+        return [.. bus.Log.Select(e => (e.Address, e.IsWrite))];
     }
 }

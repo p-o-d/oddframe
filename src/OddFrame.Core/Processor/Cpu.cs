@@ -8,10 +8,10 @@ public sealed partial class Cpu
 {
     private readonly IBus _bus;
     private int _cycle;
-
     private byte _opcode;
-
     private ushort _address;
+    private byte _pointer;
+    private bool _pageCrossed;
     private InterruptKind _pendingInterrupt;
     private InterruptKind _currentInterrupt;
 
@@ -45,6 +45,10 @@ public sealed partial class Cpu
         P = StatusFlags.I;
         TotalCycles = 0;
         _cycle = 0;
+        _opcode = 0;
+        _address = 0;
+        _pointer = 0;
+        _pageCrossed = false;
         _currentInterrupt = InterruptKind.None;
         _pendingInterrupt = InterruptKind.Reset;
     }
