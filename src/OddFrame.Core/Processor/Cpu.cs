@@ -7,13 +7,14 @@ namespace OddFrame.Core.Processor;
 public sealed partial class Cpu
 {
     private readonly IBus _bus;
-    private int _cycle;
-    private byte _opcode;
-    private ushort _address;
-    private byte _pointer;
-    private bool _pageCrossed;
     private InterruptKind _pendingInterrupt;
     private InterruptKind _currentInterrupt;
+    private int _cycle;
+    private ushort _address;
+    private byte _opcode;
+    private byte _pointer;
+    private byte _data;
+    private bool _pageCrossed;
 
     public Cpu(IBus bus)
     {
@@ -48,6 +49,7 @@ public sealed partial class Cpu
         _opcode = 0;
         _address = 0;
         _pointer = 0;
+        _data = 0;
         _pageCrossed = false;
         _currentInterrupt = InterruptKind.None;
         _pendingInterrupt = InterruptKind.Reset;
@@ -114,6 +116,12 @@ public sealed partial class Cpu
                break;
            case InstructionKind.Read:
                StepRead(info);
+               break;
+           case InstructionKind.Write:
+               StepWrite(info);
+               break;
+           case InstructionKind.ReadModifyWrite:
+               StepModify(info);
                break;
            default:
                throw new NotImplementedException($"opcode ${_opcode:X2} {info.Mnemonic} {info.Mode}");

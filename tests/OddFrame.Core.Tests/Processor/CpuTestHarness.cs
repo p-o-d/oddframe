@@ -75,4 +75,9 @@ public static class CpuTestHarness
     {
         return [.. bus.Log.Select(e => (e.Address, e.IsWrite))];
     }
+
+    public static (ushort, byte)[] Writes(this RecordingBus bus)
+    {
+        return [.. bus.Log.Where(e => e.IsWrite).Select(e => (e.Address, e.Value))];
+    }
 }

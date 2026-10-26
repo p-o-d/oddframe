@@ -310,4 +310,63 @@ public class CpuInstructionTests
         Assert.Equal(StatusFlags.V, cpu.P);
         Assert.Equal((byte)0xFF, cpu.A);
     }
+
+    // A SetZN copied from the loads would set Z on the 00 rows and clear Z|N on the 01 rows.
+    [Theory]
+    [InlineData(0x85, CpuTestHarness.Register.A, 0x00, StatusFlags.None)]
+    [InlineData(0x85, CpuTestHarness.Register.A, 0x01, StatusFlags.Z | StatusFlags.N)]
+    [InlineData(0x86, CpuTestHarness.Register.X, 0x00, StatusFlags.None)]
+    [InlineData(0x86, CpuTestHarness.Register.X, 0x01, StatusFlags.Z | StatusFlags.N)]
+    [InlineData(0x84, CpuTestHarness.Register.Y, 0x00, StatusFlags.None)]
+    [InlineData(0x84, CpuTestHarness.Register.Y, 0x01, StatusFlags.Z | StatusFlags.N)]
+    public void Store_SetsNoFlags(byte op, CpuTestHarness.Register register, byte value, StatusFlags p)
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, op, 0x10);
+        bus.Ram.Load(0x0010, [0x99]);
+        cpu.Set(register, value);
+        cpu.P = p;
+        Assert.Equal(3, cpu.RunInstruction());
+        Assert.Equal(p, cpu.P);
+        Assert.Equal(value, bus.Ram.Peek(0x0010));
+    }
+
+    [Theory]
+    [InlineData(0xE6, 0x7F, StatusFlags.None, 0x80, StatusFlags.N)]
+    [InlineData(0xE6, 0xFF, StatusFlags.None, 0x00, StatusFlags.Z)]
+    [InlineData(0xE6, 0x00, StatusFlags.Z | StatusFlags.N, 0x01, StatusFlags.None)]
+    [InlineData(0xC6, 0x01, StatusFlags.None, 0x00, StatusFlags.Z)]
+    [InlineData(0xC6, 0x00, StatusFlags.None, 0xFF, StatusFlags.N)]
+    [InlineData(0xC6, 0x80, StatusFlags.Z | StatusFlags.N, 0x7F, StatusFlags.None)]
+    // C and V are untouched.
+    [InlineData(0xE6, 0x00, StatusFlags.C | StatusFlags.V, 0x01, StatusFlags.C | StatusFlags.V)]
+    [InlineData(0xC6, 0x00, StatusFlags.C | StatusFlags.V, 0xFF, StatusFlags.C | StatusFlags.V | StatusFlags.N)]
+    public void IncDec_Memory(byte op, byte m, StatusFlags before, byte expectedM, StatusFlags expectedP)
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, op, 0x10);
+        bus.Ram.Load(0x0010, [m]);
+        cpu.P = before;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal(expectedP, cpu.P);
+        Assert.Equal(expectedM, bus.Ram.Peek(0x0010));
+        Assert.Equal((byte)0x00, cpu.A);
+    }
+
+    // Same Modify as the accumulator forms; these check memory gets the result, not A.
+    [Theory]
+    [InlineData(0x06, 0x81, false, 0x02, StatusFlags.C)]
+    [InlineData(0x46, 0x01, false, 0x00, StatusFlags.C | StatusFlags.Z)]
+    [InlineData(0x26, 0x40, true, 0x81, StatusFlags.N)]
+    [InlineData(0x66, 0x02, true, 0x81, StatusFlags.N)]
+    [InlineData(0x66, 0x01, false, 0x00, StatusFlags.C | StatusFlags.Z)]
+    public void Shift_Memory(byte op, byte m, bool carryIn, byte expectedM, StatusFlags expectedP)
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, op, 0x10);
+        bus.Ram.Load(0x0010, [m]);
+        cpu.A = 0x55;
+        cpu.P = carryIn ? StatusFlags.C : StatusFlags.None;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal(expectedP, cpu.P);
+        Assert.Equal(expectedM, bus.Ram.Peek(0x0010));
+        Assert.Equal((byte)0x55, cpu.A);
+    }
 }
