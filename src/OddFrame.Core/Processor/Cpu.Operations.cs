@@ -180,6 +180,66 @@ partial class Cpu
         }
     }
 
+    private bool BranchTaken(Operation op) // BPL BMI BVC BVS BCC BCS BNE BEQ
+    {
+        switch (op)
+        {
+            case Operation.Bpl:
+                return !IsSet(StatusFlags.N);
+            case Operation.Bmi:
+                return IsSet(StatusFlags.N);
+            case Operation.Bvc:
+                return !IsSet(StatusFlags.V);
+            case Operation.Bvs:
+                return IsSet(StatusFlags.V);
+            case Operation.Bcc:
+                return !IsSet(StatusFlags.C);
+            case Operation.Bcs:
+                return IsSet(StatusFlags.C);
+            case Operation.Bne:
+                return !IsSet(StatusFlags.Z);
+            case Operation.Beq:
+                return IsSet(StatusFlags.Z);
+            default:
+                throw new NotImplementedException(op.ToString());
+        }
+    }
+
+    private byte PushValue(Operation op) // PHA PHP; returns the byte to push
+    {
+        switch (op)
+        {
+            case Operation.Pha:
+                return A;
+            case Operation.Php:
+                return PushedStatus(true);
+            default:
+                throw new NotImplementedException(op.ToString());
+        }
+    }
+
+    private void ApplyPull(Operation op, byte v) // PLA PLP
+    {
+        switch (op)
+        {
+            case Operation.Pla:
+                A = v;
+                SetZN(A);
+                break;
+            case Operation.Plp:
+                P = (StatusFlags)v; // the setter drops B and U
+                break;
+            default:
+                throw new NotImplementedException(op.ToString());
+        }
+    }
+
+    // B exists only in the pushed copy of P: set by PHP and BRK, clear for IRQ and NMI. U is always 1.
+    private byte PushedStatus(bool breakFlag)
+    {
+        return (byte)(P | StatusFlags.U | (breakFlag ? StatusFlags.B : StatusFlags.None));
+    }
+
     private void Adc(byte m)
     {
         var sum = A + m + (Carry ? 1 : 0);
@@ -208,4 +268,6 @@ partial class Cpu
     }
     
     private bool Carry => (P & StatusFlags.C) != 0;
+
+    private bool IsSet(StatusFlags flag) => (P & flag) != 0;
 }

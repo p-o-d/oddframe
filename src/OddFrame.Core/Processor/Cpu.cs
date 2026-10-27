@@ -123,6 +123,33 @@ public sealed partial class Cpu
            case InstructionKind.ReadModifyWrite:
                StepModify(info);
                break;
+           case InstructionKind.Branch:
+               StepBranch(info);
+               break;
+           case InstructionKind.Jump:
+               StepJump(info);
+               break;
+           case InstructionKind.JumpIndirect:
+               StepJumpIndirect(info);
+               break;
+           case InstructionKind.Jsr:
+               StepJsr(info);
+               break;
+           case InstructionKind.Rts:
+               StepRts(info);
+               break;
+           case InstructionKind.Rti:
+               StepRti(info);
+               break;
+           case InstructionKind.Push:
+               StepPush(info);
+               break;
+           case InstructionKind.Pull:
+               StepPull(info);
+               break;
+           case InstructionKind.Brk:
+               StepBrk(info);
+               break;
            default:
                throw new NotImplementedException($"opcode ${_opcode:X2} {info.Mnemonic} {info.Mode}");
         }
@@ -136,9 +163,13 @@ public sealed partial class Cpu
                 _ = _bus.Read(PC);
                 break;
             case 3:
+                PushOrDummy((byte)(PC >> 8));
+                break;
             case 4:
+                PushOrDummy((byte)PC);
+                break;
             case 5:
-                PushOrDummy(0);
+                PushOrDummy(PushedStatus(_currentInterrupt == InterruptKind.Brk));
                 break;
             case 6:
                 _address = _bus.Read(Vector);
@@ -159,6 +190,7 @@ public sealed partial class Cpu
         _cycle = 0;
     }
 
+    // Reset runs the push cycles as reads: it never writes to the stack.
     private void PushOrDummy(byte value)
     {
         if (_currentInterrupt == InterruptKind.Reset)
@@ -168,7 +200,7 @@ public sealed partial class Cpu
             return;
         }
 
-        throw new NotImplementedException("IRQ/NMI/BRK interrupts not implemented yet");
+        Push(value);
     }
 
     private ushort StackAddress => (ushort)(0x0100 | S);

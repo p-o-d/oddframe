@@ -484,7 +484,7 @@ Branch condition from the opcode: bits 7-6 select N/V/C/Z, bit 5 selects the req
 
 - [ ] **Step 4: Run; green; nestest progress**
 
-Expected: the diff now walks well into the official section. Fix whatever the first mismatch is until it reaches line 5004 (`*NOP $A9`, the first unofficial). Typical culprits: a flag after `CMP`, `ROR` carry-in, `PLP`/`RTI` masking, `BIT` V.
+Expected: the diff now walks well into the official section. Fix whatever the first mismatch is until it reaches line 5260 (`*LAX ($40,X)`). Line 5004 (`*NOP $A9`) is the first unofficial opcode, but the unofficial NOPs already work from Tasks 6-7, so lines 5004-5259 should match too; the run stops with `NotImplementedException` on LAX. Typical culprits: a flag after `CMP`, `ROR` carry-in, `PLP`/`RTI` masking, `BIT` V.
 
 - [ ] **Step 5: Commit** — `feat: control flow, stack, BRK/RTI`
 
