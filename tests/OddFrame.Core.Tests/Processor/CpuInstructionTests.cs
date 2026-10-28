@@ -369,4 +369,150 @@ public class CpuInstructionTests
         Assert.Equal(expectedM, bus.Ram.Peek(0x0010));
         Assert.Equal((byte)0x55, cpu.A);
     }
+
+    [Fact]
+    public void LAX_LoadsAAndX()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0xA7, 0x10);
+        bus.Ram.Load(0x0010, [0x80]);
+        cpu.P = StatusFlags.None;
+        Assert.Equal(3, cpu.RunInstruction());
+        Assert.Equal((byte)0x80, cpu.A);
+        Assert.Equal((byte)0x80, cpu.X);
+        Assert.Equal(StatusFlags.N, cpu.P);
+    }
+
+    [Fact]
+    public void LAX_ZeroPageY_ClearsStaleZN()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0xB7, 0x10);
+        bus.Ram.Load(0x0012, [0x01]);
+        cpu.Y = 0x02;
+        cpu.P = StatusFlags.Z | StatusFlags.N;
+        Assert.Equal(4, cpu.RunInstruction());
+        Assert.Equal((byte)0x01, cpu.A);
+        Assert.Equal((byte)0x01, cpu.X);
+        Assert.Equal(StatusFlags.None, cpu.P);
+    }
+
+    [Fact]
+    public void SAX_StoresAAndX_NoFlags()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x87, 0x10);
+        cpu.A = 0xF0;
+        cpu.X = 0x3C;
+        cpu.P = StatusFlags.Z | StatusFlags.N;
+        Assert.Equal(3, cpu.RunInstruction());
+        Assert.Equal((byte)0x30, bus.Ram.Peek(0x0010));
+        Assert.Equal(StatusFlags.Z | StatusFlags.N, cpu.P);
+        Assert.Equal((byte)0xF0, cpu.A);
+        Assert.Equal((byte)0x3C, cpu.X);
+    }
+
+    // Combined RMW: memory gets the RMW result, A gets the read operation applied to it.
+    [Theory]
+    [InlineData(0x07, 0x40, 0x81, StatusFlags.None, 0x02, 0x42, StatusFlags.C)] // SLO: ASL, ORA
+    [InlineData(0x27, 0xFF, 0x80, StatusFlags.C, 0x01, 0x01, StatusFlags.C)] // RLA: ROL, AND
+    [InlineData(0x47, 0x01, 0x03, StatusFlags.None, 0x01, 0x00, StatusFlags.C | StatusFlags.Z)] // SRE: LSR, EOR
+    [InlineData(0x67, 0x10, 0x03, StatusFlags.None, 0x01, 0x12, StatusFlags.None)] // RRA: ADC uses ROR's carry; old C gives $11
+    [InlineData(0xC7, 0x42, 0x43, StatusFlags.None, 0x42, 0x42, StatusFlags.C | StatusFlags.Z)] // DCP: DEC, CMP; A unchanged
+    [InlineData(0xE7, 0x20, 0x0F, StatusFlags.C, 0x10, 0x10, StatusFlags.C)] // ISB: INC, SBC
+    [InlineData(0xE7, 0x00, 0xFF, StatusFlags.C, 0x00, 0x00, StatusFlags.C | StatusFlags.Z)] // ISB: $FF wraps to $00
+    public void CombinedModify(byte op, byte a, byte m, StatusFlags before, byte expectedM, byte expectedA,
+        StatusFlags expectedP)
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, op, 0x10);
+        bus.Ram.Load(0x0010, [m]);
+        cpu.A = a;
+        cpu.P = before;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal([(0x0010, m), (0x0010, expectedM)], bus.Writes());
+        Assert.Equal(expectedA, cpu.A);
+        Assert.Equal(expectedP, cpu.P);
+    }
+
+    [Theory]
+    [InlineData(0x0B, 0xFF, 0x80, StatusFlags.None, 0x80, StatusFlags.C | StatusFlags.N)] // ANC: C = N
+    [InlineData(0x2B, 0xFF, 0x7F, StatusFlags.C, 0x7F, StatusFlags.None)] // ANC copy; clears stale C
+    [InlineData(0x4B, 0xFF, 0x03, StatusFlags.None, 0x01, StatusFlags.C)] // ALR: AND, then LSR
+    [InlineData(0x6B, 0xFF, 0xFF, StatusFlags.C, 0xFF, StatusFlags.C | StatusFlags.N)] // ARR: bit 6 = bit 5 -> V clear
+    [InlineData(0x6B, 0x80, 0x80, StatusFlags.None, 0x40, StatusFlags.C | StatusFlags.V)] // ARR: C, V from bits 6, 5
+    [InlineData(0x6B, 0x01, 0x01, StatusFlags.None, 0x00, StatusFlags.Z)] // ARR: shifted-out bit doesn't reach C
+    [InlineData(0xAB, 0x00, 0x55, StatusFlags.None, 0x55, StatusFlags.None)] // LXA: A = X = operand
+    public void UnofficialImmediate(byte op, byte a, byte m, StatusFlags before, byte expectedA, StatusFlags expectedP)
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out _, op, m);
+        cpu.A = a;
+        cpu.P = before;
+        Assert.Equal(2, cpu.RunInstruction());
+        Assert.Equal(expectedA, cpu.A);
+        Assert.Equal(expectedP, cpu.P);
+    }
+
+    [Fact]
+    public void LXA_LoadsX()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out _, 0xAB, 0x55);
+        cpu.RunInstruction();
+        Assert.Equal((byte)0x55, cpu.X);
+    }
+
+    // X = (A & X) - m. The carry-in is ignored (an SBC-style borrow would give $2E) and V is untouched.
+    [Theory]
+    [InlineData(0xF0, 0x33, 0x01, StatusFlags.None, 0x2F, StatusFlags.C)]
+    [InlineData(0xFF, 0x02, 0x03, StatusFlags.V, 0xFF, StatusFlags.V | StatusFlags.N)]
+    [InlineData(0x0F, 0x05, 0x05, StatusFlags.None, 0x00, StatusFlags.C | StatusFlags.Z)]
+    public void AXS_SubtractsWithoutBorrow(byte a, byte x, byte m, StatusFlags before, byte expectedX,
+        StatusFlags expectedP)
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out _, 0xCB, m);
+        cpu.A = a;
+        cpu.X = x;
+        cpu.P = before;
+        Assert.Equal(2, cpu.RunInstruction());
+        Assert.Equal(expectedX, cpu.X);
+        Assert.Equal(a, cpu.A);
+        Assert.Equal(expectedP, cpu.P);
+    }
+
+    [Fact]
+    public void LAS_AndsWithS_LoadsAXS()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0xBB, 0x00, 0x02);
+        bus.Ram.Load(0x0200, [0xF0]);
+        cpu.Y = 0x00;
+        cpu.S = 0x3F;
+        cpu.P = StatusFlags.None;
+        Assert.Equal(4, cpu.RunInstruction());
+        Assert.Equal((byte)0x30, cpu.A);
+        Assert.Equal((byte)0x30, cpu.X);
+        Assert.Equal((byte)0x30, cpu.S);
+        Assert.Equal(StatusFlags.None, cpu.P);
+    }
+
+    [Fact]
+    public void JAM_Halts_AndStaysHalted()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x02);
+        Assert.Equal(2, cpu.RunInstruction());
+        Assert.True(cpu.Halted);
+        bus.Log.Clear();
+        var cycles = cpu.TotalCycles;
+        cpu.RunCycles(10);
+        Assert.True(cpu.Halted);
+        Assert.Empty(bus.Log);
+        Assert.Equal((ushort)0x8001, cpu.PC);
+        Assert.Equal(cycles + 10, cpu.TotalCycles);
+    }
+
+    [Fact]
+    public void Reset_ClearsHalted()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out _, 0x02);
+        cpu.RunInstruction();
+        cpu.Reset();
+        cpu.RunCycles(7);
+        Assert.False(cpu.Halted);
+        Assert.Equal((ushort)0x8000, cpu.PC);
+    }
 }

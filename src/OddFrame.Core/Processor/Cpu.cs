@@ -36,6 +36,9 @@ public sealed partial class Cpu
     }
 
     public ulong TotalCycles { get; private set; }
+
+    // Set by JAM; only PowerOn or Reset clears it.
+    public bool Halted { get; private set; }
     public bool IsInstructionBoundary => _cycle == 0;
     public ITraceSink? TraceSink { get; set; }
 
@@ -51,6 +54,7 @@ public sealed partial class Cpu
         _pointer = 0;
         _data = 0;
         _pageCrossed = false;
+        Halted = false;
         _currentInterrupt = InterruptKind.None;
         _pendingInterrupt = InterruptKind.Reset;
     }
@@ -59,10 +63,19 @@ public sealed partial class Cpu
     {
         _pendingInterrupt = InterruptKind.Reset;
         _cycle = 0;
+        Halted = false;
     }
 
     public void Tick()
     {
+        // A jammed CPU does nothing. Real hardware keeps driving the bus, but no test ROM can observe it.
+        // Checked before the trace hook, which would otherwise fire on every tick at _cycle == 0.
+        if (Halted)
+        {
+            TotalCycles++;
+            return;
+        }
+
         if (_cycle == 0 && TraceSink is not null && _pendingInterrupt == InterruptKind.None)
         {
             var entry = new CpuTraceEntry(

@@ -655,9 +655,13 @@ public class CpuAddressingTests
         mode is AddressingMode.AbsoluteX or AddressingMode.AbsoluteY or AddressingMode.IndirectY;
 
     private static IEnumerable<byte> OfficialOpcodes(InstructionKind kind, Func<AddressingMode, bool> modeFilter) =>
+        Opcodes(kind, unofficial: false, modeFilter);
+
+    private static IEnumerable<byte> Opcodes(InstructionKind kind, bool unofficial, Func<AddressingMode, bool> modeFilter) =>
         Enumerable.Range(0, 256)
             .Select(op => (byte)op)
-            .Where(op => OpcodeTable.Entries[op] is { Unofficial: false } info
+            .Where(op => OpcodeTable.Entries[op] is var info
+                         && info.Unofficial == unofficial
                          && info.Kind == kind
                          && info.Mode != AddressingMode.Immediate
                          && modeFilter(info.Mode));
@@ -686,7 +690,195 @@ public class CpuAddressingTests
     {
         AddressingMode.ZeroPage => 5,
         AddressingMode.ZeroPageX or AddressingMode.Absolute => 6,
-        AddressingMode.AbsoluteX => 7,
+        AddressingMode.AbsoluteX or AddressingMode.AbsoluteY => 7,
+        AddressingMode.IndirectX or AddressingMode.IndirectY => 8,
         _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null),
     };
+
+    // SHY SHX AHX TAS store reg & (H + 1); on a page cross the value replaces the address's high byte.
+    [Fact]
+    public void SHY_StoresYAndHighPlusOne()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x9C, 0x00, 0x02);
+        cpu.X = 0x00;
+        cpu.Y = 0xFF;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal(
+            [(0x8000, false), (0x8001, false), (0x8002, false), (0x0200, false), (0x0200, true)],
+            bus.Addresses());
+        Assert.Equal([(0x0200, 0x03)], bus.Writes());
+    }
+
+    [Fact]
+    public void SHY_PageCross_ValueReplacesHighByte()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x9C, 0xFF, 0x02);
+        cpu.X = 0x01;
+        cpu.Y = 0xF0;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal(
+            [(0x8000, false), (0x8001, false), (0x8002, false), (0x0200, false), (0x0000, true)],
+            bus.Addresses());
+        Assert.Equal([(0x0000, 0x00)], bus.Writes());
+    }
+
+    [Fact]
+    public void SHX_StoresXAndHighPlusOne()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x9E, 0x00, 0x02);
+        cpu.X = 0xFF;
+        cpu.Y = 0x00;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal([(0x0200, 0x03)], bus.Writes());
+    }
+
+    [Fact]
+    public void SHX_PageCross_ValueReplacesHighByte()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x9E, 0xFF, 0x02);
+        cpu.X = 0x05;
+        cpu.Y = 0x01;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal([(0x0100, 0x01)], bus.Writes());
+    }
+
+    [Fact]
+    public void TAS_SetsS_StoresSAndHighPlusOne()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x9B, 0x00, 0x02);
+        cpu.A = 0xF3;
+        cpu.X = 0x3F;
+        cpu.Y = 0x00;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal([(0x0200, 0x03)], bus.Writes());
+        Assert.Equal((byte)0x33, cpu.S);
+    }
+
+    [Fact]
+    public void AHX_AbsoluteY_StoresAAndXAndHighPlusOne()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x9F, 0x00, 0x02);
+        cpu.A = 0xFF;
+        cpu.X = 0x0E;
+        cpu.Y = 0x00;
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal([(0x0200, 0x02)], bus.Writes());
+    }
+
+    [Fact]
+    public void AHX_IndirectY_SixCycles()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0x93, 0x20);
+        cpu.A = 0xFF;
+        cpu.X = 0xFF;
+        cpu.Y = 0x01;
+        bus.Ram.Load(0x0020, [0x00, 0x02]);
+        Assert.Equal(6, cpu.RunInstruction());
+        Assert.Equal([(0x0201, 0x03)], bus.Writes());
+    }
+
+    [Fact]
+    public void DCP_IndirectX_EightCycles()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0xC3, 0x20);
+        cpu.X = 0x04;
+        bus.Ram.Load(0x0024, [0x00, 0x03]);
+        bus.Ram.Load(0x0300, [0x43]);
+        Assert.Equal(8, cpu.RunInstruction());
+        Assert.Equal(
+            [
+                (0x8000, false), (0x8001, false), (0x0020, false), (0x0024, false), (0x0025, false),
+                (0x0300, false), (0x0300, true), (0x0300, true)
+            ],
+            bus.Addresses());
+        Assert.Equal([(0x0300, 0x43), (0x0300, 0x42)], bus.Writes());
+    }
+
+    [Fact]
+    public void DCP_IndirectY_Cross_EightCycles()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0xD3, 0x20);
+        cpu.Y = 0x01;
+        bus.Ram.Load(0x0020, [0xFF, 0x02]);
+        bus.Ram.Load(0x0200, [0x99]);
+        bus.Ram.Load(0x0300, [0x43]);
+        Assert.Equal(8, cpu.RunInstruction());
+        Assert.Equal(
+            [
+                (0x8000, false), (0x8001, false), (0x0020, false), (0x0021, false), (0x0200, false),
+                (0x0300, false), (0x0300, true), (0x0300, true)
+            ],
+            bus.Addresses());
+        Assert.Equal([(0x0300, 0x43), (0x0300, 0x42)], bus.Writes());
+        Assert.Equal((byte)0x99, bus.Ram.Peek(0x0200));
+    }
+
+    [Fact]
+    public void DCP_AbsoluteY_NoCross_SevenCycles()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0xDB, 0x00, 0x02);
+        cpu.Y = 0x01;
+        bus.Ram.Load(0x0201, [0x43]);
+        Assert.Equal(7, cpu.RunInstruction());
+        Assert.Equal(
+            [
+                (0x8000, false), (0x8001, false), (0x8002, false),
+                (0x0201, false), (0x0201, false), (0x0201, true), (0x0201, true)
+            ],
+            bus.Addresses());
+        Assert.Equal([(0x0201, 0x43), (0x0201, 0x42)], bus.Writes());
+    }
+
+    [Fact]
+    public void LAX_AbsoluteY_Cross_FiveCycles()
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, 0xBF, 0xFF, 0x02);
+        cpu.Y = 0x01;
+        bus.Ram.Load(0x0200, [0x99]);
+        bus.Ram.Load(0x0300, [0x42]);
+        Assert.Equal(5, cpu.RunInstruction());
+        Assert.Equal(
+            [(0x8000, false), (0x8001, false), (0x8002, false), (0x0200, false), (0x0300, false)],
+            bus.Addresses());
+        Assert.Equal((byte)0x42, cpu.A);
+        Assert.Equal((byte)0x42, cpu.X);
+    }
+
+    public static TheoryData<byte> UnofficialModifies =>
+        [.. Opcodes(InstructionKind.ReadModifyWrite, unofficial: true, _ => true)];
+
+    [Theory]
+    [MemberData(nameof(UnofficialModifies))]
+    public void UnofficialModify_Cycles_ReadsThenWritesTwice(byte op)
+    {
+        var info = OpcodeTable.Entries[op];
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, op, 0x10, 0x00);
+        cpu.X = 0x00;
+        cpu.Y = 0x00;
+        Assert.Equal(ModifyCycles(info.Mode), cpu.RunInstruction());
+        var target = bus.Log[^1].Address;
+        Assert.Equal([(target, false), (target, true), (target, true)], bus.Addresses()[^3..]);
+        Assert.Equal(2, bus.Writes().Length);
+        Assert.Equal((ushort)(0x8000 + info.Length), cpu.PC);
+    }
+
+    // Completeness check: every opcode except JAM runs to its end without throwing.
+    public static TheoryData<byte> AllExceptJam =>
+    [
+        .. Enumerable.Range(0, 256)
+            .Select(op => (byte)op)
+            .Where(op => OpcodeTable.Entries[op].Op != Operation.Jam)
+    ];
+
+    [Theory]
+    [MemberData(nameof(AllExceptJam))]
+    public void AllOpcodes_Execute(byte op)
+    {
+        var cpu = CpuTestHarness.NewCpuWithProgram(out var bus, op, 0x10, 0x00);
+        bus.Ram.Load(0xFFFE, [0x00, 0x90]);
+        cpu.X = 0x00;
+        cpu.Y = 0x00;
+        var cycles = cpu.RunInstruction();
+        Assert.InRange(cycles, 2, 8);
+    }
 }

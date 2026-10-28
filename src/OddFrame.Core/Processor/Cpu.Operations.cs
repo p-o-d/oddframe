@@ -2,8 +2,10 @@ namespace OddFrame.Core.Processor;
 
 partial class Cpu
 {
-    private void ExecuteRead(Operation op, byte m) // LDA LDX LDY ADC SBC AND ORA EOR CMP CPX CPY NOP
+    // LDA LDX LDY ADC SBC AND ORA EOR CMP CPX CPY BIT NOP LAX LAS ANC ALR ARR AXS LXA XAA
+    private void ExecuteRead(Operation op, byte m)
     {
+        byte r;
         switch (op)
         {
             case Operation.Lda:
@@ -52,12 +54,53 @@ partial class Cpu
                 SetFlag(StatusFlags.N, (m & 0x80) != 0);
                 SetFlag(StatusFlags.V, (m & 0x40) != 0);
                 break;
+            case Operation.Lax:
+                A = X = m;
+                SetZN(A);
+                break;
+            case Operation.Las:
+                A = X = S = (byte)(m & S);
+                SetZN(A);
+                break;
+            case Operation.Anc:
+                A &= m;
+                SetZN(A);
+                SetFlag(StatusFlags.C, (A & 0x80) != 0);
+                break;
+            case Operation.Alr:
+                A &= m;
+                A = Modify(Operation.Lsr, A);
+                break;
+            case Operation.Arr:
+                // C and V come from the result, not from the bit ROR shifts out
+                r = (byte)(((A & m) >> 1) | (Carry ? 0x80 : 0));
+                A = r;
+                SetZN(A);
+                SetFlag(StatusFlags.C, (r & 0x40) != 0);
+                SetFlag(StatusFlags.V, (((r >> 6) ^ (r >> 5)) & 0x01) != 0);
+                break;
+            case Operation.Axs:
+                // CMP that also stores: no carry-in, V unchanged
+                r = (byte)(A & X);
+                Compare(r, m);
+                X = (byte)(r - m);
+                break;
+            case Operation.Lxa:
+                // Unstable on real chips; instr_test-v5 expects the operand to pass through
+                A = X = m;
+                SetZN(A);
+                break;
+            case Operation.Xaa:
+                // Unstable on real chips; untested by nestest and instr_test-v5
+                A = (byte)((A | 0xEE) & X & m);
+                SetZN(A);
+                break;
             default:
                 throw new NotImplementedException(op.ToString());
         }
     }
 
-    private void ExecuteImplied(Operation op) // transfers, INC/DEC reg, flag ops, NOP
+    private void ExecuteImplied(Operation op) // transfers, INC/DEC reg, flag ops, NOP, JAM
     {
         switch (op)
         {
@@ -119,12 +162,17 @@ partial class Cpu
                 break;
             case Operation.Nop:
                 break;
+            case Operation.Jam:
+                Halted = true;
+                break;
             default:
                 throw new NotImplementedException(op.ToString());
         }
     }
 
-    private byte Modify(Operation op, byte v) // ASL LSR ROL ROR INC DEC; returns result
+    // ASL LSR ROL ROR INC DEC SLO RLA SRE RRA DCP ISB; returns result.
+    // The unofficial ones run the RMW half, then feed its result to a read operation on A.
+    private byte Modify(Operation op, byte v)
     {
         byte r;
         bool oldCarry;
@@ -160,12 +208,36 @@ partial class Cpu
                 r = (byte)(v - 1);
                 SetZN(r);
                 return r;
+            case Operation.Slo:
+                r = Modify(Operation.Asl, v);
+                ExecuteRead(Operation.Ora, r);
+                return r;
+            case Operation.Rla:
+                r = Modify(Operation.Rol, v);
+                ExecuteRead(Operation.And, r);
+                return r;
+            case Operation.Sre:
+                r = Modify(Operation.Lsr, v);
+                ExecuteRead(Operation.Eor, r);
+                return r;
+            case Operation.Rra:
+                r = Modify(Operation.Ror, v); // ADC uses the carry ROR just produced
+                ExecuteRead(Operation.Adc, r);
+                return r;
+            case Operation.Dcp:
+                r = Modify(Operation.Dec, v);
+                ExecuteRead(Operation.Cmp, r);
+                return r;
+            case Operation.Isb:
+                r = Modify(Operation.Inc, v);
+                ExecuteRead(Operation.Sbc, r);
+                return r;
             default:
                 throw new NotImplementedException(op.ToString());
         }
     }
 
-    private byte StoreValue(Operation op) // STA STX STY; returns the byte to write, sets no flags
+    private byte StoreValue(Operation op) // STA STX STY SAX; returns the byte to write, sets no flags
     {
         switch (op)
         {
@@ -175,6 +247,8 @@ partial class Cpu
                 return X;
             case Operation.Sty:
                 return Y;
+            case Operation.Sax:
+                return (byte)(A & X);
             default:
                 throw new NotImplementedException(op.ToString());
         }

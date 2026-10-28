@@ -125,6 +125,27 @@ partial class Cpu
             case (AddressingMode.AbsoluteX, 5): ReadData(); break;
             case (AddressingMode.AbsoluteX, 6): WriteOldAndModify(info); break;
             case (AddressingMode.AbsoluteX, 7): FinishModify(); break;
+            // Only the unofficial RMW opcodes use these three modes
+            case (AddressingMode.AbsoluteY, 2): FetchAddressLow(); break;
+            case (AddressingMode.AbsoluteY, 3): FetchAddressHighIndexed(Y); break;
+            case (AddressingMode.AbsoluteY, 4): ReadUnfixedAndFix(); break;
+            case (AddressingMode.AbsoluteY, 5): ReadData(); break;
+            case (AddressingMode.AbsoluteY, 6): WriteOldAndModify(info); break;
+            case (AddressingMode.AbsoluteY, 7): FinishModify(); break;
+            case (AddressingMode.IndirectX, 2): FetchPointer(); break;
+            case (AddressingMode.IndirectX, 3): IndexPointer(); break;
+            case (AddressingMode.IndirectX, 4): ReadPointerLow(); break;
+            case (AddressingMode.IndirectX, 5): ReadPointerHigh(); break;
+            case (AddressingMode.IndirectX, 6): ReadData(); break;
+            case (AddressingMode.IndirectX, 7): WriteOldAndModify(info); break;
+            case (AddressingMode.IndirectX, 8): FinishModify(); break;
+            case (AddressingMode.IndirectY, 2): FetchPointer(); break;
+            case (AddressingMode.IndirectY, 3): ReadPointerLow(); break;
+            case (AddressingMode.IndirectY, 4): ReadPointerHighIndexed(Y); break;
+            case (AddressingMode.IndirectY, 5): ReadUnfixedAndFix(); break;
+            case (AddressingMode.IndirectY, 6): ReadData(); break;
+            case (AddressingMode.IndirectY, 7): WriteOldAndModify(info); break;
+            case (AddressingMode.IndirectY, 8): FinishModify(); break;
             default:
                 throw new NotImplementedException($"op {info.Op} mode {info.Mode} cycle {_cycle}");
         }
@@ -327,7 +348,45 @@ partial class Cpu
 
     private void FinishWrite(OpcodeInfo opcode)
     {
+        if (opcode.Op is Operation.Shy or Operation.Shx or Operation.Ahx or Operation.Tas)
+        {
+            FinishHighByteStore(opcode);
+            return;
+        }
+
         _bus.Write(_address, StoreValue(opcode.Op));
+        EndInstruction();
+    }
+
+    // SHY SHX AHX TAS store reg & (H + 1), where H is the base address's high byte before indexing.
+    // On a page cross the value also replaces the high byte of the write address.
+    private void FinishHighByteStore(OpcodeInfo opcode)
+    {
+        var highPlusOne = (byte)((_address >> 8) + (_pageCrossed ? 0 : 1)); // a crossing already added the 1
+        byte register;
+        switch (opcode.Op)
+        {
+            case Operation.Shy:
+                register = Y;
+                break;
+            case Operation.Shx:
+                register = X;
+                break;
+            case Operation.Ahx:
+                register = (byte)(A & X);
+                break;
+            case Operation.Tas:
+                S = (byte)(A & X);
+                register = S;
+                break;
+            default:
+                throw new NotImplementedException(opcode.Op.ToString());
+        }
+
+        var value = (byte)(register & highPlusOne);
+        if (_pageCrossed)
+            _address = (ushort)(value << 8 | (_address & 0x00FF));
+        _bus.Write(_address, value);
         EndInstruction();
     }
 
