@@ -4,7 +4,7 @@ using OddFrame.Core.Debug;
 
 namespace OddFrame.Core.Processor;
 
-public sealed partial class Cpu
+public sealed partial class Cpu : IStateful
 {
     private readonly IBus _bus;
 
