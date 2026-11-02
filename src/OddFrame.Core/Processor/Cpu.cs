@@ -7,14 +7,20 @@ namespace OddFrame.Core.Processor;
 public sealed partial class Cpu
 {
     private readonly IBus _bus;
-    private InterruptKind _pendingInterrupt;
-    private InterruptKind _currentInterrupt;
+
     private int _cycle;
     private ushort _address;
     private byte _opcode;
     private byte _pointer;
     private byte _data;
     private bool _pageCrossed;
+    private bool _nmiPrevious;
+    private bool _nmiLatched;
+    private InterruptKind _pendingInterrupt;
+    private InterruptKind _currentInterrupt;
+    private InterruptKind _interruptSample;
+    private InterruptKind _branchSample;
+
 
     public Cpu(IBus bus)
     {
@@ -34,6 +40,9 @@ public sealed partial class Cpu
         get;
         set => field = value & ~(StatusFlags.B | StatusFlags.U);
     }
+
+    public bool Nmi { get; set; }
+    public bool IrqLine { get; set; }
 
     public ulong TotalCycles { get; private set; }
 
@@ -55,8 +64,12 @@ public sealed partial class Cpu
         _data = 0;
         _pageCrossed = false;
         Halted = false;
+        _nmiPrevious = false;
+        _nmiLatched = false;
         _currentInterrupt = InterruptKind.None;
         _pendingInterrupt = InterruptKind.Reset;
+        _interruptSample = InterruptKind.None;
+        _branchSample = InterruptKind.None;
     }
 
     public void Reset()
@@ -100,6 +113,8 @@ public sealed partial class Cpu
             {
                 _currentInterrupt = _pendingInterrupt;
                 _pendingInterrupt = InterruptKind.None;
+                if (_currentInterrupt == InterruptKind.Nmi)
+                    _nmiLatched = false;
                 _ = _bus.Read(PC);
             }
             else
@@ -117,6 +132,8 @@ public sealed partial class Cpu
             else
                 StepInstruction();
         }
+
+        SampleInterrupts();
     }
 
     private void StepInstruction()
@@ -124,47 +141,47 @@ public sealed partial class Cpu
         var info = OpcodeTable.Entries[_opcode];
         switch (info.Kind)
         {
-           case InstructionKind.Implied:
-               StepImplied(info);
-               break;
-           case InstructionKind.Read:
-               StepRead(info);
-               break;
-           case InstructionKind.Write:
-               StepWrite(info);
-               break;
-           case InstructionKind.ReadModifyWrite:
-               StepModify(info);
-               break;
-           case InstructionKind.Branch:
-               StepBranch(info);
-               break;
-           case InstructionKind.Jump:
-               StepJump(info);
-               break;
-           case InstructionKind.JumpIndirect:
-               StepJumpIndirect(info);
-               break;
-           case InstructionKind.Jsr:
-               StepJsr(info);
-               break;
-           case InstructionKind.Rts:
-               StepRts(info);
-               break;
-           case InstructionKind.Rti:
-               StepRti(info);
-               break;
-           case InstructionKind.Push:
-               StepPush(info);
-               break;
-           case InstructionKind.Pull:
-               StepPull(info);
-               break;
-           case InstructionKind.Brk:
-               StepBrk(info);
-               break;
-           default:
-               throw new NotImplementedException($"opcode ${_opcode:X2} {info.Mnemonic} {info.Mode}");
+            case InstructionKind.Implied:
+                StepImplied(info);
+                break;
+            case InstructionKind.Read:
+                StepRead(info);
+                break;
+            case InstructionKind.Write:
+                StepWrite(info);
+                break;
+            case InstructionKind.ReadModifyWrite:
+                StepModify(info);
+                break;
+            case InstructionKind.Branch:
+                StepBranch(info);
+                break;
+            case InstructionKind.Jump:
+                StepJump(info);
+                break;
+            case InstructionKind.JumpIndirect:
+                StepJumpIndirect(info);
+                break;
+            case InstructionKind.Jsr:
+                StepJsr(info);
+                break;
+            case InstructionKind.Rts:
+                StepRts(info);
+                break;
+            case InstructionKind.Rti:
+                StepRti(info);
+                break;
+            case InstructionKind.Push:
+                StepPush(info);
+                break;
+            case InstructionKind.Pull:
+                StepPull(info);
+                break;
+            case InstructionKind.Brk:
+                StepBrk(info);
+                break;
+            default:
+                throw new NotImplementedException($"opcode ${_opcode:X2} {info.Mnemonic} {info.Mode}");
         }
     }
 
@@ -183,6 +200,12 @@ public sealed partial class Cpu
                 break;
             case 5:
                 PushOrDummy(PushedStatus(_currentInterrupt == InterruptKind.Brk));
+                if (_currentInterrupt is InterruptKind.Irq or InterruptKind.Brk && _nmiLatched)
+                {
+                    _currentInterrupt = InterruptKind.Nmi;
+                    _nmiLatched = false;
+                }
+
                 break;
             case 6:
                 _address = _bus.Read(Vector);
@@ -201,6 +224,13 @@ public sealed partial class Cpu
     private void EndInstruction()
     {
         _cycle = 0;
+        Poll(_interruptSample);
+    }
+
+    private void EndInstruction(InterruptKind kind)
+    {
+        _cycle = 0;
+        Poll(kind);
     }
 
     // Reset runs the push cycles as reads: it never writes to the stack.
@@ -214,6 +244,26 @@ public sealed partial class Cpu
         }
 
         Push(value);
+    }
+
+    private void SampleInterrupts()
+    {
+        if (Halted)
+            return;
+        if (Nmi && !_nmiPrevious)
+            _nmiLatched = true;
+        _nmiPrevious = Nmi;
+        _interruptSample = _nmiLatched
+            ? InterruptKind.Nmi
+            : IrqLine && !IsSet(StatusFlags.I)
+                ? InterruptKind.Irq
+                : InterruptKind.None;
+    }
+
+    private void Poll(InterruptKind kind)
+    {
+        if (_pendingInterrupt == InterruptKind.None)
+            _pendingInterrupt = kind;
     }
 
     private ushort StackAddress => (ushort)(0x0100 | S);

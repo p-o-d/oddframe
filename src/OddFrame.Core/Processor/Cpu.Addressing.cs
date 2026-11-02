@@ -409,6 +409,7 @@ partial class Cpu
 
     private void FetchBranchOffset(OpcodeInfo opcode)
     {
+        _branchSample = _interruptSample;
         _data = _bus.Read(PC++);
         if (!BranchTaken(opcode.Op))
             EndInstruction();
@@ -421,7 +422,7 @@ partial class Cpu
         _pageCrossed = (_address & 0xFF00) != (PC & 0xFF00);
         PC = (ushort)((PC & 0xFF00) | (_address & 0x00FF)); // high byte unfixed
         if (!_pageCrossed)
-            EndInstruction();
+            EndInstruction(_branchSample);
     }
 
     private void FixBranchHigh()
