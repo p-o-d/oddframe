@@ -2,7 +2,7 @@
 
 > **Executor:** the owner writes all code by hand (see `AGENTS.md`). Claude may write the files marked *(Claude may write)*: `tests/roms/fetch.sh`, `tests/roms/checksums.txt`, docs, CI. Everything under `src/` and `tests/OddFrame.Core.Tests/` is owner-written; this plan describes shape, bus-access sequences, and tests, not full code. Steps use `- [ ]` for tracking.
 
-**Goal:** A cycle-stepped 6502 (`OddFrame.Core.Cpu.Cpu`) with all 256 opcodes, interrupts, and the reset sequence. nestest log identical for all 8991 lines. All 16 `instr_test-v5/rom_singles` ROMs pass on a RAM-only bus.
+**Goal:** A cycle-stepped 6502 (`OddFrame.Core.Processor.Cpu`) with all 256 opcodes, interrupts, and the reset sequence. nestest log identical for all 8991 lines. All 16 `instr_test-v5/rom_singles` ROMs pass on a RAM-only bus.
 
 **Architecture:** `Cpu.Tick()` does one bus access or one internal cycle per call. A 256-entry `OpcodeTable` maps each opcode to `(Mnemonic, AddressingMode, Operation, Kind, Unofficial)`. Addressing modes are small cycle-stepped state machines, one per `(Mode, Kind)` pair; operations are pure register/flag functions applied on the final cycle. The same table drives the nestest disassembler. `Device` is not wired in this milestone (that is M2); every test talks to `Cpu` through `IBus` fakes.
 
@@ -33,7 +33,7 @@ Change any of these before starting; the tasks assume them.
 | Power-on P | `$04` stored (I set) | Spec says `$34`; identical once bits 4-5 are not stored. |
 | nestest start | write `$C000` into the RAM reset vector at `$FFFC`, then run the real reset sequence | After 7 cycles the CPU is at `$C000`, S=`$FD`, P=`$24`, CYC=7, exactly the first log line. No test-only PC setter needed. |
 | PPU column in M1 | formatter receives `(scanline, dot)` from the caller; the nestest test computes them from `TotalCycles * 3` | No PPU exists yet. In M3 the Device-level sink passes real values. `CpuTraceEntry` carries CPU state and `TotalCycles` only. |
-| Test class layout | folder `tests/OddFrame.Core.Tests/Cpu/` with several `Cpu*Tests` classes | A single `CpuTests` would be 2000+ lines. Deviates from "one test class per component" in `AGENTS.md`; amend that line when the milestone closes. |
+| Test class layout | folder `tests/OddFrame.Core.Tests/Processor/` with several `Cpu*Tests` classes | A single `CpuTests` would be 2000+ lines. Deviates from "one test class per component" in `AGENTS.md`; amend that line when the milestone closes. |
 | Operand peeks in formatter | `IBus.Peek` only | Formatter must never trigger side effects. On RAM there are none, but the rule starts now. |
 | Unofficial mnemonics | nestest spelling: `NOP LAX SAX SBC DCP ISB SLO RLA SRE RRA ANC ALR ARR AXS SHY SHX LXA XAA AHX TAS LAS JAM` | The log needs `ISB`, not `ISC`. |
 
@@ -43,6 +43,7 @@ Change any of these before starting; the tasks assume them.
 - blargg status `$6000` is `0` from RAM before the ROM writes anything. Do not stop on "not `$80`" alone; require the `$DE $B0 $61` signature at `$6001-$6003` first.
 - `nestest.nes` has 16 KB PRG. Load it at both `$8000` and `$C000`; the ROM jumps between the mirrors.
 - The log is exactly 8991 lines and ends at `C66E RTS`, `CYC:26554`. Do not run past it. The stack is empty at that RTS, so the CPU jumps into zero page afterwards.
+- Lines 8981-8989 write the APU registers and print `STA $4015 = FF`, `STA $4004 = FF` through `STA $4007 = FF`. Nintendulator's open APU registers read back `$FF`; a plain `RamBus` peeks `$00` there and those five lines mismatch. The nestest harness uses `NestestBus`, whose `Read` and `Peek` return `$FF` for `$4000-$4017`. Verified 2026-10-15; no other line in the log touches `$4000-$4017`.
 - `*` for unofficial opcodes sits at column 15 (0-based); the mnemonic always starts at column 16. Register block starts at column 48. PPU fields are `%3d,%3d`.
 - Unofficial opcodes instr_test-v5 does **not** test (marked `?` in its readme): `$8B XAA`, `$93/$9F AHX`, `$9B TAS`, `$BB LAS`. Implement a documented behaviour and move on. It **does** test `$9C SHY`, `$9E SHX`, `$AB LXA`, `$0B/$2B ANC`, `$4B ALR`, `$6B ARR`, `$CB AXS`, `$EB SBC`.
 - `dotnet test` exits 8 when a filter matches nothing. All-skipped is exit 0.
@@ -50,32 +51,33 @@ Change any of these before starting; the tasks assume them.
 ## File structure
 
 ```
-src/OddFrame.Core/Cpu/StatusFlags.cs          [Flags] enum byte: C=1 Z=2 I=4 D=8 B=16 U=32 V=64 N=128
-src/OddFrame.Core/Cpu/AddressingMode.cs       enum: Implied Accumulator Immediate ZeroPage ZeroPageX ZeroPageY
+src/OddFrame.Core/Processor/StatusFlags.cs          [Flags] enum byte: C=1 Z=2 I=4 D=8 B=16 U=32 V=64 N=128
+src/OddFrame.Core/Processor/AddressingMode.cs       enum: Implied Accumulator Immediate ZeroPage ZeroPageX ZeroPageY
                                               Absolute AbsoluteX AbsoluteY IndirectX IndirectY Indirect Relative
-src/OddFrame.Core/Cpu/Operation.cs            enum: one member per distinct operation (ADC, AND, ... , JAM)
-src/OddFrame.Core/Cpu/InstructionKind.cs      enum: Read ReadModifyWrite Write Implied Branch Jump JumpIndirect
+src/OddFrame.Core/Processor/Operation.cs            enum: one member per distinct operation (ADC, AND, ... , JAM)
+src/OddFrame.Core/Processor/InstructionKind.cs      enum: Read ReadModifyWrite Write Implied Branch Jump JumpIndirect
                                               Jsr Rts Rti Brk Push Pull
-src/OddFrame.Core/Cpu/OpcodeInfo.cs           readonly record struct (Mnemonic, Mode, Op, Kind, Unofficial); Length from Mode
-src/OddFrame.Core/Cpu/OpcodeTable.cs          static readonly OpcodeInfo[256]
-src/OddFrame.Core/Cpu/Cpu.cs                  registers, lines, PowerOn/Reset, Tick, interrupt poll, IStateful
-src/OddFrame.Core/Cpu/Cpu.Addressing.cs       partial: per-(Mode,Kind) micro-steps
-src/OddFrame.Core/Cpu/Cpu.Operations.cs       partial: ExecuteOperation switch, flag helpers
+src/OddFrame.Core/Processor/OpcodeInfo.cs           readonly record struct (Mnemonic, Mode, Op, Kind, Unofficial); Length from Mode
+src/OddFrame.Core/Processor/OpcodeTable.cs          static readonly OpcodeInfo[256]
+src/OddFrame.Core/Processor/Cpu.cs                  registers, lines, PowerOn/Reset, Tick, interrupt poll, IStateful
+src/OddFrame.Core/Processor/Cpu.Addressing.cs       partial: per-(Mode,Kind) micro-steps
+src/OddFrame.Core/Processor/Cpu.Operations.cs       partial: ExecuteOperation switch, flag helpers
 src/OddFrame.Core/Debug/CpuTraceEntry.cs      readonly struct: PC A X Y S P Opcode Operand1 Operand2 Length TotalCycles
 src/OddFrame.Core/Debug/ITraceSink.cs         void OnInstruction(in CpuTraceEntry entry)
 src/OddFrame.Core/Debug/NestestFormatter.cs   static string Format(in CpuTraceEntry e, IBus bus, int scanline, int dot)
 
 tests/OddFrame.Core.Tests/Fakes/RecordingBus.cs       IBus over RamBus, logs (Address, Value, IsWrite) per access
 tests/OddFrame.Core.Tests/Fakes/BlarggStubBus.cs      IBus over RamBus, $2002 reads return $80
+tests/OddFrame.Core.Tests/Fakes/NestestBus.cs         IBus over RamBus, $4000-$4017 reads and peeks return $FF
 tests/OddFrame.Core.Tests/Fakes/ListTraceSink.cs      ITraceSink collecting entries
-tests/OddFrame.Core.Tests/Cpu/CpuTestHarness.cs       helpers: NewCpuAt(ushort pc), RunInstruction, RunCycles
-tests/OddFrame.Core.Tests/Cpu/OpcodeTableTests.cs
-tests/OddFrame.Core.Tests/Cpu/CpuResetTests.cs
-tests/OddFrame.Core.Tests/Cpu/CpuAddressingTests.cs   bus-access sequences per (Mode, Kind)
-tests/OddFrame.Core.Tests/Cpu/CpuInstructionTests.cs  flags and results per operation
-tests/OddFrame.Core.Tests/Cpu/CpuControlFlowTests.cs  branches, JMP, JSR/RTS, stack, BRK/RTI
-tests/OddFrame.Core.Tests/Cpu/CpuInterruptTests.cs
-tests/OddFrame.Core.Tests/Cpu/CpuStateTests.cs        Save/Load, determinism
+tests/OddFrame.Core.Tests/Processor/CpuTestHarness.cs       helpers: NewCpuAt(ushort pc), RunInstruction, RunCycles
+tests/OddFrame.Core.Tests/Processor/OpcodeTableTests.cs
+tests/OddFrame.Core.Tests/Processor/CpuResetTests.cs
+tests/OddFrame.Core.Tests/Processor/CpuAddressingTests.cs   bus-access sequences per (Mode, Kind)
+tests/OddFrame.Core.Tests/Processor/CpuInstructionTests.cs  flags and results per operation
+tests/OddFrame.Core.Tests/Processor/CpuControlFlowTests.cs  branches, JMP, JSR/RTS, stack, BRK/RTI
+tests/OddFrame.Core.Tests/Processor/CpuInterruptTests.cs
+tests/OddFrame.Core.Tests/Processor/CpuStateTests.cs        Save/Load, determinism
 tests/OddFrame.Core.Tests/Debug/NestestFormatterTests.cs
 tests/OddFrame.Core.Tests/Roms/NestestTests.cs
 tests/OddFrame.Core.Tests/Roms/BlarggRunner.cs        shared $6000 protocol loop
@@ -186,8 +188,8 @@ git commit -m "test: add RecordingBus and BlarggStubBus fakes"
 ### Task 2: Enums and `OpcodeTable`
 
 **Files:**
-- Create: `src/OddFrame.Core/Cpu/StatusFlags.cs`, `AddressingMode.cs`, `Operation.cs`, `InstructionKind.cs`, `OpcodeInfo.cs`, `OpcodeTable.cs`
-- Create: `tests/OddFrame.Core.Tests/Cpu/OpcodeTableTests.cs`
+- Create: `src/OddFrame.Core/Processor/StatusFlags.cs`, `AddressingMode.cs`, `Operation.cs`, `InstructionKind.cs`, `OpcodeInfo.cs`, `OpcodeTable.cs`
+- Create: `tests/OddFrame.Core.Tests/Processor/OpcodeTableTests.cs`
 
 Fill all 256 entries now, official and unofficial. It is data entry; mistakes surface as nestest diffs later and are cheap to fix. Use the opcode matrix on the NESdev unofficial-opcodes page as the source; it lists every slot.
 
@@ -214,7 +216,7 @@ Run: `dotnet test --filter "FullyQualifiedName~OpcodeTableTests"`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/OddFrame.Core/Cpu tests/OddFrame.Core.Tests/Cpu/OpcodeTableTests.cs
+git add src/OddFrame.Core/Processor tests/OddFrame.Core.Tests/Processor/OpcodeTableTests.cs
 git commit -m "feat: add 6502 opcode table and CPU enums"
 ```
 
@@ -223,16 +225,16 @@ git commit -m "feat: add 6502 opcode table and CPU enums"
 ### Task 3: `Cpu` skeleton, power-on, reset sequence
 
 **Files:**
-- Create: `src/OddFrame.Core/Cpu/Cpu.cs`
-- Create: `tests/OddFrame.Core.Tests/Cpu/CpuTestHarness.cs`
-- Create: `tests/OddFrame.Core.Tests/Cpu/CpuResetTests.cs`
+- Create: `src/OddFrame.Core/Processor/Cpu.cs`
+- Create: `tests/OddFrame.Core.Tests/Processor/CpuTestHarness.cs`
+- Create: `tests/OddFrame.Core.Tests/Processor/CpuResetTests.cs`
 
 - [ ] **Step 1: Write failing `CpuResetTests`**
 
 Harness: `NewCpu(out RecordingBus bus)` constructs both, writes `$00 $80` at `$FFFC`, calls `PowerOn()`, then `RunCycles(7)`, then `bus.Log.Clear()`. Tests that need the raw sequence skip the clear.
 
 - `PowerOn_AfterSevenCycles_RegistersMatchSpec`: `A == X == Y == 0`, `S == 0xFD`, `P == StatusFlags.I`, `PC == 0x8000`, `TotalCycles == 7`, `IsInstructionBoundary`.
-- `PowerOn_SequenceIsSevenReadsNoWrites`: log has 7 entries, none `IsWrite`; entries 3-5 are reads of `0x01FF`, `0x01FE`, `0x01FD` (S starts at `$00` and wraps); entries 6-7 read `0xFFFC`, `0xFFFD`.
+- `PowerOn_SequenceIsSevenReadsNoWrites`: log has 7 entries, none `IsWrite`; entries 3-5 are reads of `0x0100`, `0x01FF`, `0x01FE` (S starts at `$00`; each dummy push reads `$0100+S` then decrements, ending at `$FD`); entries 6-7 read `0xFFFC`, `0xFFFD`.
 - `Reset_FromRunningState_DecrementsSByThreeAndSetsI`: after power-on set `S = 0x80`, clear I by running `58 CLI`, call `Reset()`, run 7 cycles, expect `S == 0x7D`, I set, A/X/Y untouched, PC from vector.
 - `Constructor_IsEquivalentToPowerOn`: a fresh `Cpu` ticked 7 times without calling `PowerOn()` reaches the same state as one where `PowerOn()` was called.
 
@@ -258,7 +260,7 @@ Shape:
 - Create: `src/OddFrame.Core/Debug/CpuTraceEntry.cs`, `ITraceSink.cs`, `NestestFormatter.cs`
 - Create: `tests/OddFrame.Core.Tests/Fakes/ListTraceSink.cs`
 - Create: `tests/OddFrame.Core.Tests/Debug/NestestFormatterTests.cs`
-- Modify: `src/OddFrame.Core/Cpu/Cpu.cs` (fire the sink at cycle 0, before the fetch, using `Peek`)
+- Modify: `src/OddFrame.Core/Processor/Cpu.cs` (fire the sink at cycle 0, before the fetch, using `Peek`)
 
 Build the diff tool before the instructions. The nestest harness in Task 5 then reports "first mismatch at line N" from the first opcode onward.
 
@@ -316,16 +318,26 @@ Also `PpuColumn_PadsToThree`: `PPU:134,134` and `PPU:  0, 21`.
 
 ---
 
-### Task 5: nestest harness (stays red until Task 11)
+### Task 5: nestest harness (stays red until Task 10)
 
 **Files:**
+- Create: `tests/OddFrame.Core.Tests/Fakes/NestestBus.cs`
+- Create: `tests/OddFrame.Core.Tests/NestestBusTests.cs` (next to `RecordingBusTests.cs` and `BlarggStubBusTests.cs`)
 - Create: `tests/OddFrame.Core.Tests/Roms/NestestTests.cs`
+
+- [ ] **Step 0: Write `NestestBus` and its tests**
+
+`NestestBus : IBus` wraps a `RamBus` (exposed as `Ram`). `Read` and `Peek` return `0xFF` for `0x4000 <= address <= 0x4017`; everything else passes through. `Write` always passes through to `Ram`, so a later peek of `$4015` still returns `$FF` (see Known traps).
+
+- `NestestBus_PeekApuRange_ReturnsFF`: `Peek(0x4000)`, `Peek(0x4015)`, `Peek(0x4017)` all `0xFF` on a fresh bus.
+- `NestestBus_PeekApuRange_IgnoresWrites`: `Write(0x4015, 0x02)`, then `Peek(0x4015) == 0xFF`.
+- `NestestBus_OutsideApuRange_IsRam`: `Peek(0x3FFF)` and `Peek(0x4018)` are `0x00`; `Write(0x0300, 0x89)` then `Read(0x0300) == 0x89`.
 
 - [ ] **Step 1: Write `NestestTests`** `[Trait("Category", "Rom")]`
 
 - `Trace_MatchesReferenceLog`:
   1. `TestRoms.Require("other/nestest.nes")` and `"other/nestest.log"`.
-  2. PRG = file bytes `[16 .. 16 + 0x4000)`. `bus.Ram.Load(0x8000, prg)` and `Load(0xC000, prg)`. Then overwrite `0xFFFC` with `00 C0`.
+  2. Bus is `NestestBus`. PRG = file bytes `[16 .. 16 + 0x4000)`. `bus.Ram.Load(0x8000, prg)` and `Load(0xC000, prg)`. Then overwrite `0xFFFC` with `00 C0`.
   3. `cpu.PowerOn()`, run 7 cycles. Attach `ListTraceSink` that formats each entry immediately with `scanline = (int)(cycles * 3 / 341 % 262)`, `dot = (int)(cycles * 3 % 341)`.
   4. Loop: tick until the sink has 8991 lines or a cap of 100 000 cycles is hit (the log ends at 26 554; the cap catches runaway loops).
   5. Compare line by line against the expected file. On the first mismatch fail with: line number, expected, actual, and the previous expected line for context. Compare all lines even when counts differ, then assert counts.
@@ -343,8 +355,8 @@ Expected now: fails at line 1 or 2 (no instructions implemented). Each later tas
 ### Task 6: Immediate and implied instructions
 
 **Files:**
-- Create: `src/OddFrame.Core/Cpu/Cpu.Addressing.cs`, `Cpu.Operations.cs`
-- Create: `tests/OddFrame.Core.Tests/Cpu/CpuAddressingTests.cs`, `CpuInstructionTests.cs`
+- Create: `src/OddFrame.Core/Processor/Cpu.Addressing.cs`, `Cpu.Operations.cs`
+- Create: `tests/OddFrame.Core.Tests/Processor/CpuAddressingTests.cs`, `CpuInstructionTests.cs`
 - Modify: `Cpu.cs` (fetch + dispatch)
 
 Operations in this task: LDA/LDX/LDY (imm), TAX/TAY/TXA/TYA/TSX/TXS, INX/INY/DEX/DEY, CLC/SEC/CLI/SEI/CLD/SED/CLV, NOP, ADC/SBC/AND/ORA/EOR/CMP/CPX/CPY (imm), ASL/LSR/ROL/ROR on A.
@@ -445,7 +457,7 @@ Write kind: same address pipeline, but the "unfixed" cycle is always taken and i
 ### Task 9: Control flow and stack
 
 **Files:**
-- Create: `tests/OddFrame.Core.Tests/Cpu/CpuControlFlowTests.cs`
+- Create: `tests/OddFrame.Core.Tests/Processor/CpuControlFlowTests.cs`
 - Modify: `Cpu.Addressing.cs`, `Cpu.Operations.cs`
 
 Operations: all 8 branches, JMP abs, JMP (ind), JSR, RTS, RTI, BRK, PHA, PHP, PLA, PLP.
@@ -472,7 +484,7 @@ Branch condition from the opcode: bits 7-6 select N/V/C/Z, bit 5 selects the req
 
 - [ ] **Step 4: Run; green; nestest progress**
 
-Expected: the diff now walks well into the official section. Fix whatever the first mismatch is until it reaches line 5004 (`*NOP $A9`, the first unofficial). Typical culprits: a flag after `CMP`, `ROR` carry-in, `PLP`/`RTI` masking, `BIT` V.
+Expected: the diff now walks well into the official section. Fix whatever the first mismatch is until it reaches line 5260 (`*LAX ($40,X)`). Line 5004 (`*NOP $A9`) is the first unofficial opcode, but the unofficial NOPs already work from Tasks 6-7, so lines 5004-5259 should match too; the run stops with `NotImplementedException` on LAX. Typical culprits: a flag after `CMP`, `ROR` carry-in, `PLP`/`RTI` masking, `BIT` V.
 
 - [ ] **Step 5: Commit** — `feat: control flow, stack, BRK/RTI`
 
@@ -512,7 +524,7 @@ Run the nestest filter until it passes all 8991 lines and `$02 == $03 == 0`. The
 ### Task 11: Interrupts
 
 **Files:**
-- Create: `tests/OddFrame.Core.Tests/Cpu/CpuInterruptTests.cs`
+- Create: `tests/OddFrame.Core.Tests/Processor/CpuInterruptTests.cs`
 - Modify: `Cpu.cs`
 
 Rule to implement literally: at the **end of every cycle** compute `sampled = _nmiLatched || (IrqLine && !I)` and store it. At the start of an instruction's **last** cycle, read the value stored at the end of the previous cycle (the second-to-last) into `_pendingInterrupt`. When `_cycle` returns to 0 with a pending interrupt, run the 7-cycle sequence instead of fetching. NMI edge: each cycle `if (Nmi && !_nmiPrev) _nmiLatched = true; _nmiPrev = Nmi;` and clear `_nmiLatched` when the NMI sequence starts.
@@ -545,7 +557,7 @@ Branches are the one exception (NESdev CPU_interrupts, "Branch instructions and 
 ### Task 12: `IStateful` and determinism
 
 **Files:**
-- Create: `tests/OddFrame.Core.Tests/Cpu/CpuStateTests.cs`
+- Create: `tests/OddFrame.Core.Tests/Processor/CpuStateTests.cs`
 - Modify: `Cpu.cs`
 
 - [ ] **Step 1: Write failing tests**
@@ -596,13 +608,13 @@ Run: `dotnet test`
 
 ### Task 14: Done check and docs
 
-- [ ] `dotnet build` with zero warnings (Core has warnings-as-errors; the test project should also be clean).
+- [x] `dotnet build` with zero warnings (Core has warnings-as-errors; the test project should also be clean).
 - [ ] `dotnet test --filter "Category!=Rom"` and `dotnet test --filter "Category=Rom"` both green locally and in CI. The CI ROM cache key includes `fetch.sh`, which changed, so the first run refetches.
-- [ ] Prove the fresh-clone promise: move `tests/roms/instr_test-v5` aside, run the ROM filter, expect 16 skipped, move it back.
-- [ ] Spec amendments *(Claude may write, after owner approval)*: see the next section.
-- [ ] `AGENTS.md`: Milestones entry for 1 mentions the singles; Conventions line about one test class per component allows a folder per component.
-- [ ] README: nothing new until `trace` exists in M2.
-- [ ] Open the PR from `milestone-1` to `master`.
+- [x] Prove the fresh-clone promise: move `tests/roms/instr_test-v5` aside, run the ROM filter, expect 16 skipped, move it back.
+- [x] Spec amendments: applied 2026-10-13, see the section below.
+- [x] `AGENTS.md`: Milestones entry for 1 mentions the singles; Conventions line about one test class per component allows a folder per component.
+- [x] README: status line and ROM count updated; commands unchanged until `trace` exists in M2.
+- [ ] Open the PR from `milestone-1-implementation` to `master`.
 
 ---
 
@@ -613,7 +625,7 @@ Run: `dotnet test`
 - `cpu_timing_test6`, `instr_misc`, `cpu_interrupts_v2` need the real bus, APU frame IRQ, or PPU NMI. M2 and M3.
 - Open bus: unmapped reads return 0 (spec section 4). Nothing to do in M1.
 
-## Spec amendments this plan needs (pending owner approval)
+## Spec amendments this plan needs (approved and applied 2026-10-13)
 
 1. **Section 8, milestone 1 row.** "blargg `instr_test-v5` passes with a RAM-only cartridge stub" → "all 16 `instr_test-v5/rom_singles` pass on a RAM-only bus stub (`$2002` reads return `$80`). `all_instrs.nes` requires MMC1 and moves to milestone 6."
 2. **Section 5, Trace log.** `CpuTraceEntry` carries CPU registers, opcode bytes, and total CPU cycles. PPU scanline and dot are supplied by the caller of `NestestFormatter` (Device-level sink from M3; computed from cycles in M1 tests).

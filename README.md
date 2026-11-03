@@ -4,7 +4,7 @@
 
 OddFrame is a cycle-stepped NES emulator written in C# on .NET 10, with an Avalonia desktop app and a headless command-line tool. It is a personal coding exercise: the emulation code is written by hand.
 
-Status: milestone 0 (skeleton). The solution builds, `Device` ticks a master clock, and the test-ROM tooling is in place. No CPU, PPU, or APU yet.
+Status: milestone 1 (CPU). A cycle-stepped 6502 with all 256 opcodes, the reset sequence, NMI and IRQ, and save states. It passes nestest and the 16 `instr_test-v5` singles on a RAM bus. No cartridge loader, PPU, or APU yet, so it does not run games.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ dotnet run --project src/OddFrame.App         # open the (empty) desktop window
 
 ## Test ROMs
 
-ROMs are not committed. `tests/roms/fetch.sh` downloads 44 files from [christopherpow/nes-test-roms](https://github.com/christopherpow/nes-test-roms) at a pinned commit and verifies them against `tests/roms/checksums.txt`. A second run downloads nothing and only verifies.
+ROMs are not committed. `tests/roms/fetch.sh` downloads 60 files from [christopherpow/nes-test-roms](https://github.com/christopherpow/nes-test-roms) at a pinned commit and verifies them against `tests/roms/checksums.txt`. A second run downloads nothing and only verifies.
 
 Without the ROMs, tests tagged `Category=Rom` are skipped, not failed, so `dotnet test` is green on a fresh clone.
 

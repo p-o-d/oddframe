@@ -56,9 +56,9 @@ docs/superpowers/specs/ design documents
 ## Conventions
 
 - `net10.0`, nullable enabled, warnings as errors in Core.
-- One namespace per folder: `OddFrame.Core.Cpu`, `OddFrame.Core.Ppu`, `OddFrame.Core.Bus`, `OddFrame.Core.Cartridge`, `OddFrame.Core.Input`, `OddFrame.Core.Debug`.
+- One namespace per folder: `OddFrame.Core.Processor` (`Cpu`), `OddFrame.Core.Video` (`Ppu`), `OddFrame.Core.Audio` (`Apu`), `OddFrame.Core.Bus`, `OddFrame.Core.Cartridges` (`Cartridge`, mappers), `OddFrame.Core.Input`, `OddFrame.Core.Debug`. A namespace never shares a name with a type: `Cpu` inside `OddFrame.Core.Cpu` breaks every use from outside with CS0118. Test folders mirror these names.
 - Hex literals for addresses and register values (`0x2002`, not `8194`). In prose use `$2002`.
-- Tests: xUnit. One test class per component. ROM tests carry `[Trait("Category", "Rom")]` and skip when the ROM file is missing.
+- Tests: xUnit. One test folder per component, mirroring the namespace; classes inside it are split by concern (`CpuAddressingTests`, `CpuInterruptTests`). ROM tests carry `[Trait("Category", "Rom")]` and skip when the ROM file is missing.
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`), subject 50 characters or fewer.
 
 ## Commands
@@ -81,7 +81,7 @@ Some of these do not exist until the relevant milestone is done. Check the solut
 Defined in spec section 8. Short form:
 
 0. Skeleton: solution, projects, empty `Device`, green build and test, ROM fetch script.
-1. CPU: all 256 opcodes cycle-stepped, nestest log identical, `instr_test-v5` passes.
+1. CPU: all 256 opcodes cycle-stepped, nestest log identical, the 16 `instr_test-v5` singles pass (`all_instrs.nes` needs MMC1, milestone 6).
 2. Bus + NROM + CLI: loader, cartridge, real `CpuBus`, `trace` command, `cpu_timing_test6` passes.
 3. PPU background: registers, vblank/NMI, background rendering, Donkey Kong title screen, `ppu_vbl_nmi` passes.
 4. PPU sprites + input + App: OAM DMA, sprites, sprite 0 hit, controllers, Avalonia window, SMB playable.
