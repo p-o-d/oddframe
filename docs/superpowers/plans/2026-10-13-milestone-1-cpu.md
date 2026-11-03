@@ -608,12 +608,12 @@ Run: `dotnet test`
 
 ### Task 14: Done check and docs
 
-- [ ] `dotnet build` with zero warnings (Core has warnings-as-errors; the test project should also be clean).
+- [x] `dotnet build` with zero warnings (Core has warnings-as-errors; the test project should also be clean).
 - [ ] `dotnet test --filter "Category!=Rom"` and `dotnet test --filter "Category=Rom"` both green locally and in CI. The CI ROM cache key includes `fetch.sh`, which changed, so the first run refetches.
-- [ ] Prove the fresh-clone promise: move `tests/roms/instr_test-v5` aside, run the ROM filter, expect 16 skipped, move it back.
+- [x] Prove the fresh-clone promise: move `tests/roms/instr_test-v5` aside, run the ROM filter, expect 16 skipped, move it back.
 - [x] Spec amendments: applied 2026-10-13, see the section below.
-- [ ] `AGENTS.md`: Milestones entry for 1 mentions the singles; Conventions line about one test class per component allows a folder per component.
-- [ ] README: nothing new until `trace` exists in M2.
+- [x] `AGENTS.md`: Milestones entry for 1 mentions the singles; Conventions line about one test class per component allows a folder per component.
+- [x] README: status line and ROM count updated; commands unchanged until `trace` exists in M2.
 - [ ] Open the PR from `milestone-1-implementation` to `master`.
 
 ---

@@ -80,10 +80,12 @@ Optimisation (later, not now): replace `%` with countdown counters, or tick the 
 
 The CPU is cycle-stepped. `Cpu.Tick()` performs exactly one bus access (read or write) or one internal cycle.
 
-- State: registers A, X, Y, S, PC, P; `cycle` index within the current instruction; `opcode`; temporaries (`address`, `operand`).
+- State: registers A, X, Y, S, PC, P; `cycle` index within the current instruction; `opcode`; temporaries (`address`, `pointer`, `data`, `pageCrossed`); interrupt latches (`nmiPrevious`, `nmiLatched`, the per-cycle interrupt sample, the branch sample, the pending interrupt, and the interrupt sequence in progress).
 - `Tick()`: if `cycle == 0` fetch the opcode (this is the cycle's read). Otherwise dispatch on `opcode` and `cycle` to a micro-step. The last micro-step resets `cycle` to 0.
 - Dummy reads and writes are emulated exactly. They matter for mappers and PPU registers.
 - Interrupts: NMI is edge-detected, IRQ is level-sensitive. Both are sampled at the end of the second-to-last cycle of an instruction. `Cpu` exposes `Nmi` (edge input) and `IrqLine` (level input).
+- Interrupt timing follows from that rule. Every cycle ends by sampling the lines, and an instruction's last cycle polls the sample stored one cycle earlier. CLI and PLP clearing I therefore let one more instruction run before a pending IRQ; SEI and PLP setting I do not block an IRQ already sampled. RTI writes P on cycle 4 of 6, so it has no delay. A taken branch without a page cross polls the sample from its cycle 1, as if it were a 2-cycle instruction. The 7-cycle interrupt and BRK sequences do not poll, so the handler's first instruction always runs. An NMI edge seen by the end of cycle 4 of an IRQ or BRK sequence takes over the vector (`$FFFA`); the pushed P keeps the B value of the original sequence. The hijack window is checked against `cpu_interrupts_v2` in milestone 2.
+- The 12 JAM opcodes (`$02`, `$12`, ... `$F2`) set `Halted`. A halted CPU counts cycles but makes no bus access and ignores interrupts; only `PowerOn()` and `Reset()` clear it.
 - OAM DMA (`$4014`): the CPU is stalled for 513 or 514 cycles. The DMA unit lives inside the CPU's tick path so traces see it as real cycles.
 - `IsInstructionBoundary` is true when `cycle == 0`.
 - Reset and power-on go through the real 7-cycle reset sequence.
@@ -155,7 +157,7 @@ public interface IBus
 
 | Component | Depends on | Exposes |
 |---|---|---|
-| `Cpu` | `IBus` (CpuBus) | `Tick()`, `Nmi`, `IrqLine`, registers, `Halted`, `IsInstructionBoundary`, `TotalCycles` |
+| `Cpu` | `IBus` (CpuBus) | `Tick()`, `PowerOn()`, `Reset()`, `Nmi`, `IrqLine`, registers, `Halted`, `IsInstructionBoundary`, `TotalCycles`, `TraceSink`, `IStateful` |
 | `Ppu` | `IBus` (PpuBus) | `Tick()`, `ReadRegister` / `WriteRegister`, `Scanline`, `Dot`, `Frame`, `NmiOutput`, `FrameComplete`, `Framebuffer`, read-only `Oam` and `Palette` |
 | `Apu` | none (DMC reads via a callback into CpuBus, added later) | `Tick()`, `ReadRegister` / `WriteRegister`, `IrqOutput` |
 | `Cartridge` | `IMapper` | `CpuRead` / `CpuWrite`, `PpuRead` / `PpuWrite`, `Mirroring`, `IrqOutput`, `PrgRam` |
@@ -262,6 +264,8 @@ public interface IStateful
 
 Every stateful class implements it. `Device.SaveState()` returns `byte[]`: a header (magic, version, ROM hash) followed by each component in fixed order. `LoadState(byte[])` verifies the hash and reads back. Mapper state is included through `Cartridge`. The framebuffer is included so the screen is correct immediately after load.
 
+Any change to a component's `Save` layout bumps the header version, so an old state is rejected instead of being read into the wrong fields. A component's `Load` lets `EndOfStreamException` propagate; `LoadState` converts it to `InvalidDataException`. Known gap: a load that fails partway leaves components partly overwritten. Before rewind ships in milestone 5, `LoadState` should take a snapshot first and restore it on failure.
+
 ### Rewind
 
 `RewindBuffer` is a ring of N snapshots. The host decides N and pushes `device.SaveState()` every frame or every few frames, then calls `device.LoadState(buffer.Pop())` while the rewind key is held. An NROM state is around 20 KB, so thousands of frames fit comfortably.
@@ -323,12 +327,12 @@ All tests in `OddFrame.Core.Tests` (xUnit).
 
 ### Layer 2: test ROMs
 
-`TestRomRunner` loads a ROM into a real `Device`, runs it, and checks a result.
+`TestRomRunner` loads a ROM into a real `Device`, runs it, and checks a result. Until milestone 2 wires `Cpu` into `Device`, `BlarggRunner` in the tests runs NROM ROMs with a bare `Cpu` on `BlarggStubBus` (RAM, `$2002` reads `$80`).
 
 | ROM | Check | Covers |
 |---|---|---|
 | `nestest.nes` | Point the RAM reset vector at `$C000` and run the real reset sequence, trace through `NestestFormatter`, diff line by line against `nestest.log`; then assert `$02` and `$03` are zero. | All official and unofficial opcodes, cycle counts |
-| blargg `instr_test-v5`, `cpu_timing_test6`, `instr_misc`, `cpu_interrupts_v2` | Run until `$6000` leaves `$80`, read status byte, read text at `$6004`. | CPU edge cases, dummy reads, interrupt timing |
+| blargg `instr_test-v5`, `cpu_timing_test6`, `instr_misc`, `cpu_interrupts_v2` | Run until `$6001-$6003` hold the signature `DE B0 61` and `$6000` is not `$80`. Read the status byte (`$00` pass, `$81` reset request, otherwise a failure code) and the text at `$6004`. | CPU edge cases, dummy reads, interrupt timing |
 | blargg `ppu_vbl_nmi`, `sprite_hit_tests`, `sprite_overflow_tests`, `oam_read`, `ppu_open_bus` | Same `$6000` protocol. | PPU timing, sprite 0, NMI edge |
 | blargg `apu_test`, `apu_reset`, `dmc_dma_during_read4` | Same protocol. | APU frame counter, later channels |
 | `mmc3_test_2` | Same protocol. | MMC3 scanline IRQ |
@@ -343,7 +347,7 @@ Test ROMs are free and redistributable. `tests/roms/fetch.sh` downloads them and
 
 ### Organisation
 
-One test class per component, named after it. `[Trait("Category", "Rom")]` on ROM tests so `dotnet test --filter Category!=Rom` runs the fast set.
+One test folder per component, mirroring the namespace. Classes inside it are split by concern and named after the component (`CpuAddressingTests`, `CpuInterruptTests`, `CpuStateTests`). `[Trait("Category", "Rom")]` on ROM tests so `dotnet test --filter Category!=Rom` runs the fast set.
 
 ## 8. Milestones
 
