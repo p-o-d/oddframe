@@ -84,7 +84,7 @@ The CPU is cycle-stepped. `Cpu.Tick()` performs exactly one bus access (read or 
 - `Tick()`: if `cycle == 0` fetch the opcode (this is the cycle's read). Otherwise dispatch on `opcode` and `cycle` to a micro-step. The last micro-step resets `cycle` to 0.
 - Dummy reads and writes are emulated exactly. They matter for mappers and PPU registers.
 - Interrupts: NMI is edge-detected, IRQ is level-sensitive. Both are sampled at the end of the second-to-last cycle of an instruction. `Cpu` exposes `Nmi` (edge input) and `IrqLine` (level input).
-- Interrupt timing follows from that rule. Every cycle ends by sampling the lines, and an instruction's last cycle polls the sample stored one cycle earlier. CLI and PLP clearing I therefore let one more instruction run before a pending IRQ; SEI and PLP setting I do not block an IRQ already sampled. RTI writes P on cycle 4 of 6, so it has no delay. A taken branch without a page cross polls the sample from its cycle 1, as if it were a 2-cycle instruction. The 7-cycle interrupt and BRK sequences do not poll, so the handler's first instruction always runs. An NMI edge seen by the end of cycle 4 of an IRQ or BRK sequence takes over the vector (`$FFFA`); the pushed P keeps the B value of the original sequence. The hijack window is checked against `cpu_interrupts_v2` in milestone 2.
+- Interrupt timing follows from that rule. Every cycle ends by sampling the lines, and an instruction's last cycle polls the sample stored one cycle earlier. CLI and PLP clearing I therefore let one more instruction run before a pending IRQ; SEI and PLP setting I do not block an IRQ already sampled. RTI writes P on cycle 4 of 6, so it has no delay. A taken branch without a page cross polls the sample from its cycle 1, as if it were a 2-cycle instruction. The 7-cycle interrupt and BRK sequences do not poll, so the handler's first instruction always runs. An NMI edge seen by the end of cycle 4 of an IRQ or BRK sequence takes over the vector (`$FFFA`); the pushed P keeps the B value of the original sequence. The hijack window is checked against the `cpu_interrupts_v2` singles once PPU NMI (milestone 3), OAM DMA (milestone 4), and the APU frame IRQ exist; the combined `cpu_interrupts.nes` is MMC1.
 - The 12 JAM opcodes (`$02`, `$12`, ... `$F2`) set `Halted`. A halted CPU counts cycles but makes no bus access and ignores interrupts; only `PowerOn()` and `Reset()` clear it.
 - OAM DMA (`$4014`): the CPU is stalled for 513 or 514 cycles. The DMA unit lives inside the CPU's tick path so traces see it as real cycles.
 - `IsInstructionBoundary` is true when `cycle == 0`.
@@ -162,7 +162,7 @@ public interface IBus
 | `Apu` | none (DMC reads via a callback into CpuBus, added later) | `Tick()`, `ReadRegister` / `WriteRegister`, `IrqOutput` |
 | `Cartridge` | `IMapper` | `CpuRead` / `CpuWrite`, `PpuRead` / `PpuWrite`, `Mirroring`, `IrqOutput`, `PrgRam` |
 | `StandardController` | none | `Write(strobe)`, `Read()` serial bit, `SetButtons(byte)` |
-| `Device` | all of the above | `Tick()`, `Step*()`, `Run`, `Reset()`, `PowerOn()`, `SaveState()` / `LoadState()`, `Framebuffer`, `SetController` |
+| `Device` | all of the above | `Tick()`, `Step*()`, `Run`, `Reset()`, `PowerOn()`, `SaveState()` / `LoadState()`, `Framebuffer`, `SetController`, `Cpu`, `Cartridge`, `CpuMemory` (the CPU bus, for side-effect-free `Peek`) |
 
 ### Interrupt wiring
 
@@ -170,7 +170,7 @@ Lives in `Device.Tick()`, not in components. After ticking the PPU, Device copie
 
 ### Construction
 
-Constructor injection, no DI container. `Device` builds components in dependency order: cartridge, PpuBus(cartridge), Ppu(ppuBus), Apu, controllers, CpuBus(ppu, apu, cartridge, controllers), Cpu(cpuBus). Tests can hand a fake `IBus` to `Cpu` and run nestest against RAM alone.
+Constructor injection, no DI container. `Device(DeviceOptions, RomImage)` takes the ROM; one `Device` serves one ROM, and a host loads another ROM by building a new `Device`. It builds components in dependency order: cartridge, PpuBus(cartridge), Ppu(ppuBus), Apu, controllers, CpuBus(ppu, apu, cartridge, controllers), Cpu(cpuBus). Tests can hand a fake `IBus` to `Cpu` and run nestest against RAM alone.
 
 ### Reset vs power-on
 
@@ -180,11 +180,11 @@ Constructor injection, no DI container. `Device` builds components in dependency
 
 ### Loader
 
-`InesLoader.Load(byte[])` parses iNES 1.0 and detects NES 2.0 (header byte 7, bits 2-3 equal to 2). It returns a `RomImage` record: PRG ROM bytes, CHR ROM bytes (empty means 8 KB CHR RAM), mapper number, mirroring (horizontal, vertical, four-screen), battery flag. Trainers are skipped. An unknown mapper throws `UnsupportedMapperException` with the mapper number in the message.
+`InesLoader.Load(byte[])` parses iNES 1.0 and detects NES 2.0 (header byte 7, bits 2-3 equal to 2; mapper bits 8-11 from byte 8). An iNES 1.0 header whose bytes 12-15 are not all zero is archaic ("DiskDude!" and similar); byte 7 is ignored and the mapper comes from byte 6 alone. It returns a `RomImage` record: PRG ROM bytes, CHR ROM bytes (empty means 8 KB CHR RAM), mapper number, mirroring (horizontal, vertical, four-screen), battery flag. Trainers are skipped. The loader accepts any mapper number; `MapperFactory.Create` throws `UnsupportedMapperException` with the mapper number in the message, so adding a mapper never touches the loader.
 
 ### Cartridge
 
-Thin shell. Owns the `RomImage`, a CHR RAM buffer when needed, 8 KB PRG RAM when the mapper wants it, and one `IMapper`. Forwards all bus traffic to the mapper.
+Thin shell. Owns the `RomImage`, a CHR RAM buffer when needed, 8 KB PRG RAM when the mapper wants it (NROM always does: blargg test ROMs report at `$6000`), and one `IMapper`. Forwards all bus traffic to the mapper.
 
 ```csharp
 public interface IMapper : IStateful
@@ -327,12 +327,13 @@ All tests in `OddFrame.Core.Tests` (xUnit).
 
 ### Layer 2: test ROMs
 
-`TestRomRunner` loads a ROM into a real `Device`, runs it, and checks a result. Until milestone 2 wires `Cpu` into `Device`, `BlarggRunner` in the tests runs NROM ROMs with a bare `Cpu` on `BlarggStubBus` (RAM, `$2002` reads `$80`).
+`TestRomRunner` loads a ROM into a real `Device`, runs it, and checks a result. Until milestone 3 adds the PPU, `BlarggRunner` in the tests runs NROM ROMs on the real `Cartridge` and `CpuBus` behind `BlarggStubBus`, a test decorator that answers `$2002` reads with `$80` (blargg ROMs wait for vblank before anything else).
 
 | ROM | Check | Covers |
 |---|---|---|
-| `nestest.nes` | Point the RAM reset vector at `$C000` and run the real reset sequence, trace through `NestestFormatter`, diff line by line against `nestest.log`; then assert `$02` and `$03` are zero. | All official and unofficial opcodes, cycle counts |
-| blargg `instr_test-v5`, `cpu_timing_test6`, `instr_misc`, `cpu_interrupts_v2` | Run until `$6001-$6003` hold the signature `DE B0 61` and `$6000` is not `$80`. Read the status byte (`$00` pass, `$81` reset request, otherwise a failure code) and the text at `$6004`. | CPU edge cases, dummy reads, interrupt timing |
+| `nestest.nes` | Run the real reset sequence, then set PC to `$C000` (the ROM's reset vector is `$C004`, the GUI mode). Trace through `NestestFormatter`, diff line by line against `nestest.log`; then assert `$02` and `$03` are zero. The formatter prints `FF` for operands in `$4000-$4017`, the value Nintendulator recorded in the log; the bus itself stays honest. | All official and unofficial opcodes, cycle counts |
+| blargg `instr_test-v5`, `instr_misc`, `cpu_interrupts_v2` (the `rom_singles`; the combined ROMs are MMC1) | Run until `$6001-$6003` hold the signature `DE B0 61` and `$6000` is not `$80`. Read the status byte (`$00` pass, `$81` reset request, otherwise a failure code) and the text at `$6004`. | CPU edge cases, dummy reads, interrupt timing |
+| blargg `cpu_timing_test6` | No `$6000` protocol. It times each instruction by counting loop passes between PPU NMIs and prints the result on screen. Run about 1000 frames, then read the nametable text for `PASSED` or `FAIL OP`. | Cycle counts of all instructions, page-cross penalties |
 | blargg `ppu_vbl_nmi`, `sprite_hit_tests`, `sprite_overflow_tests`, `oam_read`, `ppu_open_bus` | Same `$6000` protocol. | PPU timing, sprite 0, NMI edge |
 | blargg `apu_test`, `apu_reset`, `dmc_dma_during_read4` | Same protocol. | APU frame counter, later channels |
 | `mmc3_test_2` | Same protocol. | MMC3 scanline IRQ |
@@ -355,8 +356,8 @@ One test folder per component, mirroring the namespace. Classes inside it are sp
 |---|---|---|
 | 0 | Skeleton | Solution, three projects, test project, `Device` with empty `Tick()`. `dotnet build && dotnet test` green. ROM fetch script works. |
 | 1 | CPU | All 256 opcodes cycle-stepped, interrupts, reset sequence. nestest log diff identical for all 8991 lines. All 16 blargg `instr_test-v5/rom_singles` pass on a RAM-only bus stub (`$2002` reads return `$80`). `all_instrs.nes` requires MMC1 and moves to milestone 6. |
-| 2 | Bus + NROM + CLI | `InesLoader`, `Cartridge`, `Nrom`, real `CpuBus` with RAM mirroring. `oddframe trace` on nestest matches through the real bus. `cpu_timing_test6` passes. |
-| 3 | PPU background | Scanline/dot state machine, vblank and NMI, `$2000-$2007`, background fetch pipeline, scrolling, palette. `oddframe run --screenshot` shows the Donkey Kong title screen. `ppu_vbl_nmi` passes. |
+| 2 | Bus + NROM + CLI | `InesLoader`, `Cartridge`, `Nrom`, real `CpuBus` with RAM mirroring, `Device` wiring. `oddframe trace` on nestest matches through the real bus. The 16 `instr_test-v5` singles and `instr_misc` singles 01-02 pass on the real `CpuBus` and NROM. No PPU yet. |
+| 3 | PPU background | Scanline/dot state machine, vblank and NMI, `$2000-$2007`, background fetch pipeline, scrolling, palette. `oddframe run --screenshot` shows the Donkey Kong title screen. `ppu_vbl_nmi` and `cpu_timing_test6` pass; `instr_test-v5` and `instr_misc` 01-03 run through `Device` without the `$2002` test decorator. |
 | 4 | PPU sprites + input + App | OAM DMA, sprite evaluation, sprite 0 hit, 8×16 sprites, controllers. Avalonia window with keyboard. Donkey Kong, SMB, Balloon Fight playable. `sprite_hit_tests` pass. |
 | 5 | Debugger | `ObservableBus`, trace sink, breakpoints, step buttons, disassembly, memory view, PPU viewers. Save/load state and rewind in the App. Determinism tests green. |
 | 6 | Mappers | UxROM, CNROM, MMC1, AxROM. Mega Man, Zelda, Metroid, Castlevania boot and play. |
