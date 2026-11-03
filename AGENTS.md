@@ -82,8 +82,8 @@ Defined in spec section 8. Short form:
 
 0. Skeleton: solution, projects, empty `Device`, green build and test, ROM fetch script.
 1. CPU: all 256 opcodes cycle-stepped, nestest log identical, the 16 `instr_test-v5` singles pass (`all_instrs.nes` needs MMC1, milestone 6).
-2. Bus + NROM + CLI: loader, cartridge, real `CpuBus`, `trace` command, `cpu_timing_test6` passes.
-3. PPU background: registers, vblank/NMI, background rendering, Donkey Kong title screen, `ppu_vbl_nmi` passes.
+2. Bus + NROM + CLI: loader, cartridge, real `CpuBus`, `Device` wiring, `trace` command; nestest through the real bus, `instr_test-v5` and `instr_misc` 01-02 singles on real `CpuBus` + NROM. No PPU.
+3. PPU background: registers, vblank/NMI, background rendering, Donkey Kong title screen, `ppu_vbl_nmi` and `cpu_timing_test6` pass.
 4. PPU sprites + input + App: OAM DMA, sprites, sprite 0 hit, controllers, Avalonia window, SMB playable.
 5. Debugger: observable bus, trace sink, breakpoints, viewers, save states, rewind, determinism tests.
 6. Mappers: UxROM, CNROM, MMC1, AxROM.
